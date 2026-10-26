@@ -1,0 +1,36 @@
+{
+  "name": "moneyright",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=24.7"
+  },
+  "scripts": {
+    "dev": "next dev --port 3002 --hostname 127.0.0.1",
+    "build": "next build",
+    "start": "next start --port 3002 --hostname 127.0.0.1",
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "16.3.5",
+    "qrcode": "^1.5.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^26.6.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.5",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "^5.0.1"
+  }
+}

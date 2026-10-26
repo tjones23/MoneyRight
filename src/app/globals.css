@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+/**
+ * MoneyRight shares WhatsGood and Outside's palette — a near-black ground,
+ * low-chroma surfaces — with a green accent in place of their gold.
+ *
+ * Unlike Outside there's no theme setting to remember, so no inline theme
+ * script: the page follows the device, light or dark, through CSS alone.
+ */
+:root {
+  color-scheme: dark;
+
+  --ink: #08080b;
+  --surface: #121218;
+  --surface-2: #1b1b23;
+  --line: #2a2a35;
+  --line-soft: #1f1f28;
+
+  --text: #f3f3f6;
+  --muted: #9a9aa8;
+  --muted-dim: #6e6e7c;
+
+  --accent: #3ddc97;
+  --accent-ink: #00180d;
+
+  --danger: #ef4444;
+  --good: #3ddc97;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+
+    --ink: #f5f5f7;
+    --surface: #ffffff;
+    --surface-2: #ededf1;
+    --line: #d6d6de;
+    --line-soft: #e6e6eb;
+
+    --text: #16161d;
+    --muted: #555563;
+    --muted-dim: #74747f;
+
+    /* The dark theme's green is unreadable as text on white. */
+    --accent: #0b7a4b;
+    --accent-ink: #ffffff;
+
+    --danger: #c42121;
+    --good: #0b7a4b;
+  }
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-muted-dim: var(--muted-dim);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-danger: var(--danger);
+  --color-good: var(--good);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+body {
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
