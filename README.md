@@ -12,8 +12,9 @@ Hosted the same way as [Outside](https://github.com/tjones23/Outside) and
 [WhatsGood](https://github.com/tjones23/WhatsGood), minus everything that
 would make it public.
 
-> **Status: phase 1 of 4.** Accounts, sign-in and tailnet-only hosting are
-> done. Linking accounts comes next — see [docs/PLAN.md](docs/PLAN.md).
+> **Status: phase 2 of 4.** Accounts, sign-in, tailnet-only hosting, linked
+> balances (Teller, Plaid), federal-loan projection and the net-worth
+> overview are done. History charts come next — see [docs/PLAN.md](docs/PLAN.md).
 
 ## Setup
 
@@ -39,6 +40,48 @@ and production always does.
 
 Nothing is required in `.env.local`; `.env.example` lists the options.
 
+## Linking accounts
+
+| Where | Through | What you need |
+| --- | --- | --- |
+| Banks and cards (Chase, PNC…) | [Teller](https://teller.io) | A free developer account: the application id, and the client certificate + key it gives you |
+| Brokerages, mortgages, loans (Fidelity, Rocket Mortgage…) | [Plaid](https://plaid.com) Trial | Client id and secret; Production access via the free Trial plan |
+| Federal student loans (MOHELA) | MoneyRight itself | The servicer's numbers, entered once on the Accounts page |
+
+1. **Teller:** sign up at teller.io, create an application, download the
+   certificate. Put `certificate.pem` and `private_key.pem` in
+   `.moneyright/teller/` (owner-only: `chmod 600`), and set
+   `TELLER_APPLICATION_ID` in `.env.local`. The `development` environment —
+   the default — is free and real, up to 100 enrollments.
+2. **Plaid:** sign up at dashboard.plaid.com, request the Trial plan, set
+   `PLAID_CLIENT_ID`, `PLAID_SECRET` and `PLAID_ENV=production` in
+   `.env.local`. Some institutions (Fidelity among them) connect by OAuth,
+   which Plaid enables only after your dashboard's application profile is
+   filled in — check its OAuth institutions page.
+3. `./run-prod.command restart`, then **Accounts** in the app.
+
+**Plaid's 10 links are for life.** Removing a Plaid connection doesn't give
+its slot back, so the Accounts page shows how many are left, and a broken
+connection is *reconnected* (same slot), never re-linked. Teller covers
+banks and cards so Plaid's slots go to what only it can reach.
+
+**Federal loans** are projected: simple daily interest, payments to interest
+first — how Direct Loans work. Add each loan with its principal, unpaid
+interest, rate, payment and payment day, as of a date. If MOHELA's number
+ever drifts (forbearance, an IDR change, an extra payment), open the loan,
+correct what differs and save; it projects from there.
+
+Balances refresh by themselves about once a day (hourly retries after a
+failure), from a timer inside the server — nothing outside the tailnet can
+call in, so there are no webhooks. Plaid's balances are its free cached
+ones, which it updates about daily; MoneyRight never calls Plaid's billed
+real-time balance endpoint. Both the Teller and Plaid CDNs are allowed in
+the CSP, and only they.
+
+For the dev server, put sandbox keys in `.env.development.local`
+(`TELLER_ENVIRONMENT=sandbox`, `PLAID_ENV=sandbox`) — sandbox links use test
+banks and don't count toward any limit.
+
 ## Security model
 
 | Layer | What it does |
@@ -50,8 +93,8 @@ Nothing is required in `.env.local`; `.env.example` lists the options.
 | **Accounts** | Password (argon2id) **and** an authenticator code (TOTP) for everyone (except on the dev server's own data, above). Recovery codes for a lost phone; an admin can reset someone's authenticator. Sign-up is closed: the first account needs the setup code from this Mac, everyone else an invite (one use, seven days). |
 | **Sessions** | Random 256-bit cookie, stored only as a hash. `HttpOnly`, `SameSite=Strict`, `Secure` over the tailnet. Idle timeout 3 days, hard limit 14. A session only works from the tailnet login that signed in. Changing your password signs out everything else. |
 | **Guessing** | Sign-in, code and setup attempts are rate-limited per account and per device. |
-| **At rest** | SQLite in `.moneyright/<env>/`, owner-only (0700/0600), gitignored. Secrets the app must read back (TOTP secrets now, bank tokens later) are sealed with AES-256-GCM under `master.key`. FileVault covers the rest. |
-| **Headers** | Strict CSP with a per-request nonce, nothing loaded from anywhere but itself, `no-store` on every page, HSTS on the tailnet, no framing. |
+| **At rest** | SQLite in `.moneyright/<env>/`, owner-only (0700/0600), gitignored. Secrets the app must read back — TOTP secrets and every bank access token — are sealed with AES-256-GCM under `master.key`, each bound to its row. Tokens never reach the browser after linking, and logs carry only error codes, never balances or names. |
+| **Headers** | CSP with a per-request script nonce; the only outside scripts and frames are Teller's and Plaid's own CDNs. `no-store` on every page, HSTS on the tailnet, no framing. |
 
 **Back up `master.key` with the database.** Without it the sealed fields
 can't be read; the server refuses to start rather than make a new one.
@@ -109,11 +152,19 @@ src/lib/               pure, framework-free, unit-tested
   session-policy.ts    session stages and timeouts
   tokens.ts            session/invite tokens, recovery and setup codes
   security-headers.ts  CSP and the rest
-src/server/            the database and everything about identity
+  money.ts             integer cents in, dollars out
+  amortization.ts      federal-loan projection (simple daily interest)
+  account-kinds.ts     Teller/Plaid types → cash, investment, credit, mortgage…
+  net-worth.ts         assets − liabilities
+src/server/            the database, identity and bank data
   db.ts                node:sqlite, migrations in PRAGMA user_version
   context.ts           data directory, master key, setup code
   accounts.ts          users, sessions, invites, second factor — no Next imports
   auth.ts              the data access layer: cookies, requireUser, rate limits
+  finance.ts           connections, accounts, daily snapshots, loan schedules
+  sync.ts              one refresh pass: fetch, snapshot, record errors by code
+  scheduler.ts         the hourly timer that runs it
+  providers/           Teller (mTLS) and Plaid clients over one HTTPS transport
 src/app/               pages and Server Actions
 src/proxy.ts           the network gate and headers, on every request
 src/instrumentation.ts opens the database and writes the setup code at startup

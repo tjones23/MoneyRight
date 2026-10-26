@@ -77,6 +77,68 @@ const MIGRATIONS: string[] = [
     value TEXT NOT NULL
   );
   `,
+  // 3: linked institutions, their accounts, daily balances, loan schedules.
+  `
+  CREATE TABLE connections (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL CHECK (provider IN ('teller', 'plaid')),
+    -- Teller's enrollment id, or Plaid's item id.
+    external_id TEXT NOT NULL,
+    institution_name TEXT NOT NULL,
+    -- Sealed (lib/sealed.ts), bound to provider and external id.
+    access_token TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'reconnect', 'error')),
+    -- The provider's error code when status isn't ok; never a message with data in it.
+    status_code TEXT,
+    last_synced_at INTEGER,
+    last_attempt_at INTEGER,
+    created_at INTEGER NOT NULL,
+    UNIQUE (provider, external_id)
+  );
+  CREATE INDEX connections_user ON connections(user_id);
+
+  CREATE TABLE accounts (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- Null for an account MoneyRight works out itself (a loan schedule).
+    connection_id INTEGER REFERENCES connections(id) ON DELETE CASCADE,
+    external_id TEXT,
+    name TEXT NOT NULL,
+    institution_name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    subtype TEXT,
+    mask TEXT,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    include_in_net_worth INTEGER NOT NULL DEFAULT 1,
+    -- The provider stopped returning it (closed, or deselected).
+    gone INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    UNIQUE (connection_id, external_id)
+  );
+  CREATE INDEX accounts_user ON accounts(user_id);
+
+  -- One balance per account per day, the day's last reading winning.
+  CREATE TABLE balance_snapshots (
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    day TEXT NOT NULL,
+    balance_cents INTEGER NOT NULL,
+    available_cents INTEGER,
+    recorded_at INTEGER NOT NULL,
+    PRIMARY KEY (account_id, day)
+  );
+
+  CREATE TABLE loan_schedules (
+    account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    principal_cents INTEGER NOT NULL,
+    accrued_interest_cents INTEGER NOT NULL DEFAULT 0,
+    annual_rate_bps INTEGER NOT NULL,
+    monthly_payment_cents INTEGER NOT NULL,
+    payment_day INTEGER NOT NULL CHECK (payment_day BETWEEN 1 AND 31),
+    anchor_date TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDatabase(path: string): DatabaseSync {

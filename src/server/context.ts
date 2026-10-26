@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import { openDatabase } from "./db";
+import { migrate, openDatabase } from "./db";
 import { KEY_BYTES } from "@/lib/sealed";
 import { newSetupCode } from "@/lib/tokens";
 
@@ -12,6 +12,9 @@ import { newSetupCode } from "@/lib/tokens";
  *   .moneyright/production/   what `next start` uses
  *   .moneyright/development/  what `next dev` uses — so trying things out
  *                             never touches real data
+ *
+ * (The turbopackIgnore comments tell the build these paths are data, not
+ * source, so it doesn't trace the whole project into the server output.)
  *
  * Each holds `moneyright.db`, its `master.key` (unless MONEYRIGHT_MASTER_KEY
  * is set), and, until the first account exists, `setup-code`. All are owner
@@ -69,12 +72,12 @@ export function loadMasterKey(dir: string, databaseIsNew: boolean): Buffer {
   if (fromEnv) return checkKey(Buffer.from(fromEnv, "base64"), "MONEYRIGHT_MASTER_KEY");
 
   const path = join(dir, "master.key");
-  if (existsSync(path)) return checkKey(Buffer.from(readFileSync(path, "utf8").trim(), "base64"), path);
+  if (existsSync(/*turbopackIgnore: true*/ path)) return checkKey(Buffer.from(readFileSync(/*turbopackIgnore: true*/ path, "utf8").trim(), "base64"), path);
   if (!databaseIsNew) {
     throw new Error(`${path} is missing but the database already exists — restore the key from a backup.`);
   }
   const key = randomBytes(KEY_BYTES);
-  writeFileSync(path, key.toString("base64") + "\n", { mode: 0o600, flag: "wx" });
+  writeFileSync(/*turbopackIgnore: true*/ path, key.toString("base64") + "\n", { mode: 0o600, flag: "wx" });
   return key;
 }
 
@@ -84,14 +87,14 @@ function checkKey(key: Buffer, where: string): Buffer {
 }
 
 export function createContext(dir: string, env: Environment = currentEnvironment()): AppContext {
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  chmodSync(dir, 0o700);
+  mkdirSync(/*turbopackIgnore: true*/ dir, { recursive: true, mode: 0o700 });
+  chmodSync(/*turbopackIgnore: true*/ dir, 0o700);
   const dbPath = join(dir, "moneyright.db");
-  const databaseIsNew = !existsSync(dbPath);
+  const databaseIsNew = !existsSync(/*turbopackIgnore: true*/ dbPath);
   const key = loadMasterKey(dir, databaseIsNew);
   const db = openDatabase(dbPath);
   for (const suffix of ["", "-wal", "-shm"]) {
-    if (existsSync(dbPath + suffix)) chmodSync(dbPath + suffix, 0o600);
+    if (existsSync(/*turbopackIgnore: true*/ dbPath + suffix)) chmodSync(/*turbopackIgnore: true*/ dbPath + suffix, 0o600);
   }
   const madeBy = databaseEnvironment(db, dir, env, databaseIsNew);
   return { db, key, dataDir: dir, secondFactorRequired: !(env === "development" && madeBy === "development") };
@@ -102,8 +105,11 @@ export function createContext(dir: string, env: Environment = currentEnvironment
 const globalForContext = globalThis as unknown as { __moneyright?: AppContext };
 
 export function appContext(): AppContext {
-  globalForContext.__moneyright ??= createContext(dataDir());
-  return globalForContext.__moneyright;
+  const existing = globalForContext.__moneyright;
+  if (!existing) return (globalForContext.__moneyright = createContext(dataDir()));
+  // A hot reload can bring new migrations into a database opened before them.
+  if (process.env.NODE_ENV === "development") migrate(existing.db);
+  return existing;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,20 +133,20 @@ export function hasUsers(db: DatabaseSync): boolean {
 export function ensureSetupCode(ctx: AppContext): string | null {
   const path = setupCodePath(ctx.dataDir);
   if (hasUsers(ctx.db)) {
-    rmSync(path, { force: true });
+    rmSync(/*turbopackIgnore: true*/ path, { force: true });
     return null;
   }
-  if (existsSync(path)) return readFileSync(path, "utf8").trim();
+  if (existsSync(/*turbopackIgnore: true*/ path)) return readFileSync(/*turbopackIgnore: true*/ path, "utf8").trim();
   const code = newSetupCode();
-  writeFileSync(path, code + "\n", { mode: 0o600 });
+  writeFileSync(/*turbopackIgnore: true*/ path, code + "\n", { mode: 0o600 });
   return code;
 }
 
 export function readSetupCode(ctx: AppContext): string | null {
   const path = setupCodePath(ctx.dataDir);
-  return existsSync(path) ? readFileSync(path, "utf8").trim() : null;
+  return existsSync(/*turbopackIgnore: true*/ path) ? readFileSync(/*turbopackIgnore: true*/ path, "utf8").trim() : null;
 }
 
 export function clearSetupCode(ctx: AppContext) {
-  rmSync(setupCodePath(ctx.dataDir), { force: true });
+  rmSync(/*turbopackIgnore: true*/ setupCodePath(ctx.dataDir), { force: true });
 }

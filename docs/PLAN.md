@@ -28,12 +28,13 @@ change, an extra payment) re-anchors the schedule from that date.
 1. **Foundation — done.** Scaffold from Outside; launchers with no LAN or
    Funnel; own `moneyright` node; network gate; SQLite with sealed fields;
    accounts with password + TOTP, recovery codes, invites, sessions.
-2. **Linking.** Teller Connect and Plaid Link; access tokens sealed per user;
-   a scheduled refresh (daily) writing balance snapshots; the MOHELA
-   schedule; the overview: net worth, assets vs. liabilities, accounts by
-   type, staleness.
-3. **History.** Net-worth trend from snapshots; per-account history; relink
-   prompts when a connection breaks (watching Plaid's slot count).
+2. **Linking — done.** Teller Connect and Plaid Link; access tokens sealed
+   per connection; an in-process refresh (daily, hourly retry) writing daily
+   balance snapshots; reconnect via update mode; the Plaid slot counter;
+   the MOHELA schedule; the overview: net worth, change since 30 days ago,
+   assets vs. owed, accounts by kind, staleness.
+3. **History.** Net-worth trend chart from snapshots; per-account history;
+   a "what changed" breakdown.
 4. **Polish.** Encrypted nightly backups (database + key, kept apart);
    export and delete-my-data; a local `reset-2fa` script for a locked-out
    admin; passkeys as an optional second factor; Home Screen polish.

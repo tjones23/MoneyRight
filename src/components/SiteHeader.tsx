@@ -13,6 +13,9 @@ export function SiteHeader({ user }: { user: User }) {
           <Link href="/" className="hover:text-text">
             Overview
           </Link>
+          <Link href="/accounts" className="hover:text-text">
+            Accounts
+          </Link>
           <Link href="/settings" className="hover:text-text">
             Settings
           </Link>
