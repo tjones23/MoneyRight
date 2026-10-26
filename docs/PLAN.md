@@ -37,14 +37,16 @@ change, an extra payment) re-anchors the schedule from that date.
    all) with a crosshair tooltip and a table view; per-account history pages;
    "what changed", which keeps newly linked accounts apart from real change
    so linking a brokerage doesn't read as a gain.
-4. **Polish.** Encrypted nightly backups (database + key, kept apart);
-   export and delete-my-data; a local `reset-2fa` script for a locked-out
-   admin; passkeys as an optional second factor; Home Screen polish.
+4. **Polish — done.** Encrypted nightly backups (14 daily, 12 monthly),
+   restorable only with master.key, which is kept apart; `npm run
+   moneyright` for backup / restore / reset-2fa / reset-password on this
+   Mac; export, remove-financial-data, delete-account and remove-person;
+   passkeys as an alternative second step.
 
 ## Decisions made along the way
 
-- Second factor is TOTP for everyone (works on every device, no extra
-  dependency); passkeys may come in phase 4.
+- Every account has TOTP; passkeys are an optional alternative for the
+  second step, never a replacement for the password.
 - No ORM: `node:sqlite` with hand-written SQL and numbered migrations.
 - Dev and production keep separate data directories.
 - The dev server skips the authenticator, but only on a database the dev

@@ -1,6 +1,18 @@
 import type { Metadata } from "next";
 import { PageBody, SiteHeader } from "@/components/SiteHeader";
-import { ChangePasswordForm, CreateInviteForm, RegenerateCodesForm } from "@/components/SettingsForms";
+import {
+  BackupNowForm,
+  ChangePasswordForm,
+  CreateInviteForm,
+  DeleteAccountForm,
+  DeleteFinancialDataForm,
+  RegenerateCodesForm,
+  RemovePersonForm,
+} from "@/components/SettingsForms";
+import { AddPasskeyForm } from "@/components/PasskeyButtons";
+import { backupDir, backupDirIsLocal, lastBackup, listBackups } from "@/server/backup";
+import { listPasskeys } from "@/server/passkeys";
+import { removePasskeyAction } from "@/app/actions/passkeys";
 import { requireUser } from "@/server/auth";
 import { appContext } from "@/server/context";
 import { listOpenInvites, listSessions, listUsers, recentEvents, unusedRecoveryCodeCount } from "@/server/accounts";
@@ -27,11 +39,12 @@ function describeDevice(userAgent: string | null): string {
 }
 
 export default async function SettingsPage() {
-  const { user, session } = await requireUser();
+  const { user, session, request } = await requireUser();
   const { db, secondFactorRequired } = appContext();
   const sessions = listSessions(db, user.id);
   const codesLeft = unusedRecoveryCodeCount(db, user.id);
   const events = recentEvents(db, user.id);
+  const passkeys = listPasskeys(db, user.id);
 
   return (
     <>
@@ -47,6 +60,38 @@ export default async function SettingsPage() {
               {codesLeft} of 10 unused. Each signs you in once if you don&apos;t have your authenticator.
             </p>
             <RegenerateCodesForm />
+          </Section>
+        )}
+
+        {secondFactorRequired && (
+          <Section title="Passkeys">
+            <p className="mb-4 text-sm text-muted">
+              Sign in with Face ID, Touch ID or a security key instead of typing a code — still after your password,
+              and your authenticator app keeps working. A passkey works only at the address it was made on; this is{" "}
+              <span className="font-mono">{request.relyingParty.id}</span>.
+            </p>
+            {passkeys.length > 0 && (
+              <ul className="mb-4 divide-y divide-line-soft text-sm">
+                {passkeys.map((p) => (
+                  <li key={p.id} className="flex items-center gap-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p>{p.name}</p>
+                      <p className="text-xs text-muted">
+                        {p.rpId} · added {when.format(p.createdAt)}
+                        {p.lastUsedAt && ` · last used ${when.format(p.lastUsedAt)}`}
+                      </p>
+                    </div>
+                    <form action={removePasskeyAction}>
+                      <input type="hidden" name="id" value={p.id} />
+                      <button type="submit" className="rounded-full border border-line px-3 py-1 text-xs hover:border-muted-dim">
+                        Remove
+                      </button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <AddPasskeyForm />
           </Section>
         )}
 
@@ -85,6 +130,27 @@ export default async function SettingsPage() {
 
         {user.isAdmin && <AdminSections adminId={user.id} />}
 
+        <Section title="Your data">
+          <div className="space-y-6 text-sm">
+            <div>
+              <p className="text-muted">Everything MoneyRight holds about you — accounts, every daily balance, loans — as JSON. No passwords or bank tokens.</p>
+              <a href="/settings/export" className="mt-3 inline-block rounded-full border border-line bg-surface px-4 py-2 font-medium hover:border-muted-dim">
+                Download my data
+              </a>
+            </div>
+            <details>
+              <summary className="cursor-pointer font-medium">Remove all my financial data</summary>
+              <p className="my-3 text-muted">Revokes every bank link at Teller and Plaid and deletes your accounts, balances and loans. Your sign-in stays. Plaid links used stay used.</p>
+              <DeleteFinancialDataForm />
+            </details>
+            <details>
+              <summary className="cursor-pointer font-medium text-danger">Delete my account</summary>
+              <p className="my-3 text-muted">Everything above, plus your sign-in. This can&apos;t be undone (short of restoring a backup).</p>
+              <DeleteAccountForm />
+            </details>
+          </div>
+        </Section>
+
         <Section title="Recent activity">
           <ul className="space-y-1 text-sm">
             {events.map((e, i) => (
@@ -104,15 +170,18 @@ export default async function SettingsPage() {
 }
 
 function AdminSections({ adminId }: { adminId: number }) {
-  const { db } = appContext();
+  const ctx = appContext();
+  const { db } = ctx;
   const users = listUsers(db);
   const invites = listOpenInvites(db);
+  const backups = listBackups(ctx);
+  const last = lastBackup(ctx);
   return (
     <>
       <Section title="People">
         <ul className="divide-y divide-line-soft text-sm">
           {users.map((u) => (
-            <li key={u.id} className="flex items-center gap-3 py-2">
+            <li key={u.id} className="flex flex-wrap items-center gap-3 py-2">
               <div className="min-w-0 flex-1">
                 <p>
                   {u.displayName} <span className="text-muted">({u.username})</span>
@@ -120,6 +189,12 @@ function AdminSections({ adminId }: { adminId: number }) {
                 </p>
                 <p className="text-xs text-muted">{u.hasTotp ? "Authenticator set up" : "Hasn't set up an authenticator yet"}</p>
               </div>
+              {u.id !== adminId && (
+                <details className="order-last w-full basis-full text-xs">
+                  <summary className="cursor-pointer text-muted">Remove {u.displayName}</summary>
+                  <RemovePersonForm userId={u.id} username={u.username} />
+                </details>
+              )}
               {u.id !== adminId && u.hasTotp && (
                 <form action={resetTotpAction}>
                   <input type="hidden" name="userId" value={u.id} />
@@ -131,6 +206,25 @@ function AdminSections({ adminId }: { adminId: number }) {
             </li>
           ))}
         </ul>
+      </Section>
+
+      <Section title="Backups">
+        <div className="space-y-3 text-sm">
+          <p>
+            {last.at ? `Last backup ${when.format(last.at)}` : "No backup yet"} · {backups.length} kept (14 daily, 12 monthly) ·{" "}
+            nightly, encrypted
+          </p>
+          {last.error && <p className="text-danger">The last attempt failed: {last.error}</p>}
+          <p className="break-all text-xs text-muted">In {backupDir(ctx)}</p>
+          {backupDirIsLocal() && (
+            <p className="rounded-lg border border-dashed border-line p-3 text-muted">
+              These are on the same disk as the database, so a dead disk takes both. Set MONEYRIGHT_BACKUP_DIR to a folder that
+              leaves this Mac — an iCloud Drive folder works — and keep master.key in your password manager: restoring needs it,
+              and it must not sit beside the backups.
+            </p>
+          )}
+          <BackupNowForm />
+        </div>
       </Section>
 
       <Section title="Invite someone">

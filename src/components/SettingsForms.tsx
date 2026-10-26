@@ -1,7 +1,15 @@
 "use client";
 
 import { useActionState, useSyncExternalStore } from "react";
-import { changePasswordAction, createInviteAction, regenerateCodesAction } from "@/app/actions/settings";
+import {
+  backupNowAction,
+  changePasswordAction,
+  createInviteAction,
+  deleteAccountAction,
+  deleteFinancialDataAction,
+  regenerateCodesAction,
+  removePersonAction,
+} from "@/app/actions/settings";
 import type { SettingsState } from "@/app/actions/settings";
 import { Field, FormMessage, RecoveryCodes, Submit } from "@/components/ui/forms";
 import { PASSWORD_MIN } from "@/lib/password-rules";
@@ -76,6 +84,54 @@ export function CreateInviteForm() {
       )}
       <Field label="Who it's for" name="note" placeholder="e.g. Sam" maxLength={80} hint="Just a label for the list below." />
       <Submit tone="quiet">Create invite link</Submit>
+    </form>
+  );
+}
+
+export function BackupNowForm() {
+  const [state, action] = useActionState(backupNowAction, initial);
+  return (
+    <form action={action} className="space-y-3">
+      <FormMessage error={state.error} done={state.done} />
+      <Submit tone="quiet">Back up now</Submit>
+    </form>
+  );
+}
+
+export function DeleteFinancialDataForm() {
+  const [state, action] = useActionState(deleteFinancialDataAction, initial);
+  return (
+    <form action={action} className="space-y-3">
+      <FormMessage error={state.error} done={state.done} />
+      <Field label="Type “delete” to confirm" name="confirm" autoComplete="off" required />
+      <Submit tone="danger">Remove all my financial data</Submit>
+    </form>
+  );
+}
+
+export function DeleteAccountForm() {
+  const [state, action] = useActionState(deleteAccountAction, initial);
+  return (
+    <form action={action} className="space-y-3">
+      <FormMessage error={state.error} />
+      <Field label="Your password" name="password" type="password" autoComplete="current-password" required />
+      <Submit tone="danger">Delete my account</Submit>
+    </form>
+  );
+}
+
+export function RemovePersonForm({ userId, username }: { userId: number; username: string }) {
+  const [state, action] = useActionState(removePersonAction, initial);
+  return (
+    <form action={action} className="mt-2 flex flex-wrap items-end gap-2">
+      <input type="hidden" name="userId" value={userId} />
+      <div className="min-w-0 flex-1">
+        <Field label={`Type “${username}” to remove them and all their data`} name="confirm" autoComplete="off" required />
+      </div>
+      <Submit tone="danger">Remove</Submit>
+      <div className="w-full">
+        <FormMessage error={state.error} done={state.done} />
+      </div>
     </form>
   );
 }

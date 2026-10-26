@@ -139,6 +139,28 @@ const MIGRATIONS: string[] = [
     updated_at INTEGER NOT NULL
   );
   `,
+  // 4: passkeys, as an alternative to the authenticator code.
+  `
+  CREATE TABLE passkeys (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- base64url credential id, from the authenticator.
+    credential_id TEXT NOT NULL UNIQUE,
+    public_key BLOB NOT NULL,
+    counter INTEGER NOT NULL DEFAULT 0,
+    transports TEXT,
+    -- The host it was made on: a passkey for the tailnet name doesn't work on localhost.
+    rp_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER
+  );
+  CREATE INDEX passkeys_user ON passkeys(user_id);
+
+  -- The WebAuthn challenge in flight for this session, and when it was issued.
+  ALTER TABLE sessions ADD COLUMN webauthn_challenge TEXT;
+  ALTER TABLE sessions ADD COLUMN webauthn_challenge_at INTEGER;
+  `,
 ];
 
 export function openDatabase(path: string): DatabaseSync {

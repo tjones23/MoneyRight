@@ -458,7 +458,8 @@ export function checkSecondFactor(ctx: Ctx, userId: number, input: string, now: 
 
 /**
  * An admin clears someone's authenticator — a lost phone, with the recovery
- * codes lost too. They're signed out, and set one up again at next sign-in.
+ * codes lost too — and their passkeys with it. They're signed out, and set
+ * one up again at next sign-in.
  */
 export function resetTotp(db: DatabaseSync, adminId: number, userId: number, now: number) {
   if (!getUser(db, adminId)?.isAdmin) throw new AccountError("Only an admin can reset an authenticator.");
@@ -466,6 +467,7 @@ export function resetTotp(db: DatabaseSync, adminId: number, userId: number, now
   transaction(db, () => {
     db.prepare("UPDATE users SET totp_secret = NULL, totp_last_counter = NULL WHERE id = ?").run(userId);
     db.prepare("DELETE FROM recovery_codes WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM passkeys WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
     logEvent(db, userId, "authenticator-reset", now, `by admin #${adminId}`);
   });

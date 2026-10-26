@@ -12,10 +12,7 @@ Hosted the same way as [Outside](https://github.com/tjones23/Outside) and
 [WhatsGood](https://github.com/tjones23/WhatsGood), minus everything that
 would make it public.
 
-> **Status: phase 3 of 4.** Accounts, sign-in, tailnet-only hosting, linked
-> balances (Teller, Plaid), federal-loan projection, the net-worth overview
-> and history (trend chart, per-account history, what changed) are done.
-> Backups and polish come next — see [docs/PLAN.md](docs/PLAN.md).
+> **Status: all four phases done** — see [docs/PLAN.md](docs/PLAN.md).
 
 ## Setup
 
@@ -83,6 +80,45 @@ For the dev server, put sandbox keys in `.env.development.local`
 (`TELLER_ENVIRONMENT=sandbox`, `PLAID_ENV=sandbox`) — sandbox links use test
 banks and don't count toward any limit.
 
+## Backups, restores and getting back in
+
+**Nightly, encrypted.** Once a day the server copies the database (SQLite's
+backup API, safe while it runs), gzips it, encrypts it with a key derived
+from `master.key`, and writes `moneyright-YYYY-MM-DD.mrbak` to
+`MONEYRIGHT_BACKUP_DIR`. It keeps 14 dailies and the newest of each of the
+last 12 months. Settings → Backups (admins) shows the last run and has
+**Back up now**.
+
+Set `MONEYRIGHT_BACKUP_DIR` to somewhere off this disk (an iCloud Drive
+folder is fine — the files are encrypted) and **save a copy of
+`.moneyright/production/master.key` in your password manager.** A backup is
+useless without the key, and pointless if the key sits beside it.
+
+From this Mac's terminal — never the web:
+
+```bash
+npm run moneyright -- backup                              # back up now
+npm run moneyright -- restore <file.mrbak> --key <master.key>   # into a fresh install
+npm run moneyright -- restore <file.mrbak> --force         # over the current data (stop the server first; the old one is kept beside it)
+npm run moneyright -- reset-2fa <username>                 # lost phone and recovery codes
+npm run moneyright -- reset-password <username>            # forgotten password (asks for the new one)
+```
+
+Add `--dev` to act on the dev server's data instead. These need no sign-in:
+anyone who can run them can already read the data directory.
+
+**Passkeys.** Settings → Passkeys adds Face ID / Touch ID / a security key as
+the second step instead of typing a code (always after the password; the
+authenticator app keeps working). A passkey belongs to the address it was
+made on — make it at `https://moneyright.<tailnet>.ts.net`, where you'll
+use it; one made at `localhost` only works there.
+
+**Your data.** Settings → Your data: **Download my data** (JSON — accounts,
+every daily balance, loans; no passwords or tokens), **Remove all my
+financial data** (revokes every bank link, keeps the sign-in), and **Delete
+my account**. The last admin can't delete themselves while others still use
+MoneyRight; admins can remove other people under People.
+
 ## Security model
 
 | Layer | What it does |
@@ -91,7 +127,7 @@ banks and don't count toward any limit.
 | **Tailnet** | `tailscale serve` on MoneyRight's own node proxies HTTPS to it, adding the sender's tailnet login. |
 | **No Funnel** | The launchers have no `public` command, and turn Funnel off (loudly) if they ever find it on. |
 | **Network gate** | Every request, static files included, must carry a tailnet identity or come straight from this Mac. Anything else — which is what Funnel traffic would look like — gets a 403 before any page renders (`src/lib/network-gate.ts`). `MONEYRIGHT_ALLOWED_LOGINS` narrows it to named tailnet logins. |
-| **Accounts** | Password (argon2id) **and** an authenticator code (TOTP) for everyone (except on the dev server's own data, above). Recovery codes for a lost phone; an admin can reset someone's authenticator. Sign-up is closed: the first account needs the setup code from this Mac, everyone else an invite (one use, seven days). |
+| **Accounts** | Password (argon2id) **and** a second step for everyone — an authenticator code (TOTP) or a passkey (WebAuthn, user verification required) — except on the dev server's own data, above. Recovery codes for a lost phone; an admin can reset someone's authenticator. Sign-up is closed: the first account needs the setup code from this Mac, everyone else an invite (one use, seven days). |
 | **Sessions** | Random 256-bit cookie, stored only as a hash. `HttpOnly`, `SameSite=Strict`, `Secure` over the tailnet. Idle timeout 3 days, hard limit 14. A session only works from the tailnet login that signed in. Changing your password signs out everything else. |
 | **Guessing** | Sign-in, code and setup attempts are rate-limited per account and per device. |
 | **At rest** | SQLite in `.moneyright/<env>/`, owner-only (0700/0600), gitignored. Secrets the app must read back — TOTP secrets and every bank access token — are sealed with AES-256-GCM under `master.key`, each bound to its row. Tokens never reach the browser after linking, and logs carry only error codes, never balances or names. |
@@ -158,6 +194,7 @@ src/lib/               pure, framework-free, unit-tested
   account-kinds.ts     Teller/Plaid types → cash, investment, credit, mortgage…
   net-worth.ts         assets − liabilities
   history.ts           daily series from sparse snapshots; what changed, and why
+  backup-format.ts     the encrypted backup file, and which ones to keep
 src/server/            the database, identity and bank data
   db.ts                node:sqlite, migrations in PRAGMA user_version
   context.ts           data directory, master key, setup code
@@ -165,12 +202,15 @@ src/server/            the database, identity and bank data
   auth.ts              the data access layer: cookies, requireUser, rate limits
   finance.ts           connections, accounts, daily snapshots, loan schedules
   sync.ts              one refresh pass: fetch, snapshot, record errors by code
-  scheduler.ts         the hourly timer that runs it
+  scheduler.ts         the hourly timer that runs it, and the nightly backup
+  backup.ts            backups: consistent copy, encrypt, prune
+  passkeys.ts          WebAuthn registration and sign-in (SimpleWebAuthn)
+  my-data.ts           export, and deleting data, accounts and people
   providers/           Teller (mTLS) and Plaid clients over one HTTPS transport
 src/app/               pages and Server Actions
 src/proxy.ts           the network gate and headers, on every request
 src/instrumentation.ts opens the database and writes the setup code at startup
-scripts/               launchers' shared shell, lid-hold registry
+scripts/               launchers' shared shell, lid-hold registry, moneyright.ts (local admin commands)
 ```
 
 ## Commands

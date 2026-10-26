@@ -19,7 +19,7 @@ import { providers } from "@/server/providers";
 import { ProviderError } from "@/server/providers/http";
 import { tellerNonce, verifyTellerSignatures } from "@/server/providers/teller";
 import type { PlaidLinkPurpose } from "@/server/providers/plaid";
-import { syncConnection } from "@/server/sync";
+import { revokeConnection, syncConnection } from "@/server/sync";
 
 /**
  * Linking, refreshing and removing connections. The browser runs Teller
@@ -191,15 +191,7 @@ export async function removeConnectionAction(form: FormData) {
   const ctx = appContext();
   const connection = getConnection(ctx.db, user.id, Number(form.get("connectionId")));
   if (!connection) return;
-  const clients = providers();
-  try {
-    const token = connectionToken(ctx, connection);
-    if (connection.provider === "teller") await clients.teller?.removeEnrollment(token);
-    else await clients.plaid?.removeItem(token);
-  } catch (error) {
-    // Still removed here: the person asked, and a dead token is harmless.
-    console.warn(`[moneyright] revoking connection #${connection.id} failed:`, error instanceof ProviderError ? error.code : "unexpected");
-  }
+  await revokeConnection(ctx, providers(), connection);
   deleteConnection(ctx.db, user.id, connection.id);
   logEvent(ctx.db, user.id, "unlinked", Date.now(), connection.institutionName);
   refresh();

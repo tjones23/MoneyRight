@@ -103,3 +103,20 @@ export async function syncDue(ctx: Ctx, providers: Providers, now: number) {
   syncScheduledLoans(ctx, now);
   return due.length;
 }
+
+/**
+ * Withdraws this app's access at the provider. Best effort: a token that's
+ * already dead is harmless, and the person asked for it gone either way.
+ */
+export async function revokeConnection(ctx: Ctx, providers: Providers, connection: Connection) {
+  try {
+    const token = connectionToken(ctx, connection);
+    if (connection.provider === "teller") await providers.teller?.removeEnrollment(token);
+    else await providers.plaid?.removeItem(token);
+  } catch (error) {
+    console.warn(
+      `[moneyright] revoking connection #${connection.id} failed:`,
+      error instanceof ProviderError ? error.code : "unexpected",
+    );
+  }
+}

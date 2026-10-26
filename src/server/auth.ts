@@ -22,6 +22,8 @@ export interface RequestInfo {
   tailnetLogin: string | null;
   https: boolean;
   userAgent: string | null;
+  /** For passkeys: the host and origin the browser is on. */
+  relyingParty: { id: string; origin: string };
 }
 
 /**
@@ -33,10 +35,14 @@ export async function requestInfo(): Promise<RequestInfo> {
   const h = await headers();
   const gate = checkNetwork((name) => h.get(name), parseAllowedLogins(process.env.MONEYRIGHT_ALLOWED_LOGINS));
   if (!gate.ok) throw new Error(`Refused: ${gate.reason}`);
+  const https = h.get("x-forwarded-proto") === "https";
+  // Next fills X-Forwarded-Host from Host; the gate has already vetted both.
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost";
   return {
     tailnetLogin: gate.via === "tailnet" ? gate.login : null,
-    https: h.get("x-forwarded-proto") === "https",
+    https,
     userAgent: h.get("user-agent"),
+    relyingParty: { id: host.replace(/:\d+$/, "").replace(/^\[|\]$/g, ""), origin: `${https ? "https" : "http"}://${host}` },
   };
 }
 
