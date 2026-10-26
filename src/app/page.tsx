@@ -2,13 +2,16 @@ import Link from "next/link";
 import { PageBody, SiteHeader } from "@/components/SiteHeader";
 import { requireUser } from "@/server/auth";
 import { appContext } from "@/server/context";
-import { balancesOn, firstBalanceDay, listAccounts, listConnections } from "@/server/finance";
+import { HistoryTable, RangeFilter } from "@/components/History";
+import { TrendChart } from "@/components/TrendChart";
+import { firstBalanceDay, listAccounts, listConnections, snapshots } from "@/server/finance";
 import { isLiability, KIND_LABEL } from "@/lib/account-kinds";
-import { addDays, daysBetween, todayKey } from "@/lib/local-date";
+import { changes, netWorthSeries, parseRange, rangeStart } from "@/lib/history";
+import { daysBetween, todayKey } from "@/lib/local-date";
 import { formatCents, formatChange } from "@/lib/money";
 import { groupByKind, netWorth } from "@/lib/net-worth";
 
-/** The overview: net worth, then every account by kind. */
+/** The overview: net worth and its trend, what moved it, then every account by kind. */
 
 const dayFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
@@ -23,11 +26,13 @@ function staleness(day: string | null, today: string): string | null {
   return `as of ${formatDay(day)}`;
 }
 
-export default async function OverviewPage() {
+export default async function OverviewPage({ searchParams }: PageProps<"/">) {
   const { user } = await requireUser();
   const { db } = appContext();
   const today = todayKey();
-  const accounts = listAccounts(db, user.id).filter((a) => !a.gone);
+  const range = parseRange((await searchParams).range);
+  const everyAccount = listAccounts(db, user.id);
+  const accounts = everyAccount.filter((a) => !a.gone);
   const connections = listConnections(db, user.id);
   const broken = connections.filter((c) => c.status === "reconnect");
 
@@ -49,21 +54,28 @@ export default async function OverviewPage() {
   }
 
   const total = netWorth(accounts);
-  // Change over 30 days, or since the first balance if that's more recent.
-  const first = firstBalanceDay(db, user.id);
-  const since = first && daysBetween(first, today) > 0 ? (daysBetween(first, today) >= 30 ? addDays(today, -30) : first) : null;
-  const then = since ? netWorth(balancesOn(db, user.id, since)) : null;
+  const from = rangeStart(range, today, firstBalanceDay(db, user.id));
+  const history = snapshots(db, user.id, today);
+  const series = netWorthSeries(everyAccount, history, from, today);
+  const moved = daysBetween(from, today) > 0 ? changes(everyAccount, history, from, today) : null;
+  const names = new Map(everyAccount.map((a) => [a.id, a]));
+  const movers = moved?.accounts.filter((c) => c.effectCents !== 0).slice(0, 8) ?? [];
 
   return (
     <>
       <SiteHeader user={user} />
       <PageBody title="Net worth">
         <section className="rounded-2xl border border-line bg-surface p-6">
-          <p className="text-4xl font-bold tracking-tight tabular-nums sm:text-5xl">{formatCents(total.netWorthCents, { whole: true })}</p>
-          {then && (
-            <p className={`mt-2 text-sm tabular-nums ${total.netWorthCents >= then.netWorthCents ? "text-good" : "text-danger"}`}>
-              {formatChange(total.netWorthCents - then.netWorthCents)}{" "}
-              <span className="text-muted">since {formatDay(since!)}</span>
+          <p className="text-5xl font-bold tracking-tight">{formatCents(total.netWorthCents, { whole: true })}</p>
+          {moved && (
+            <p className="mt-2 text-sm">
+              <span className={`font-medium ${moved.changeCents >= 0 ? "text-good" : "text-danger"}`}>
+                {moved.changeCents >= 0 ? "▲" : "▼"} {formatChange(moved.changeCents)}
+              </span>{" "}
+              <span className="text-muted">since {formatDay(from)}</span>
+              {moved.addedCents !== 0 && (
+                <span className="text-muted"> · {formatChange(moved.addedCents)} from accounts added</span>
+              )}
             </p>
           )}
           <dl className="mt-5 grid grid-cols-2 gap-4 text-sm">
@@ -82,6 +94,44 @@ export default async function OverviewPage() {
             </p>
           )}
         </section>
+
+        <section className="space-y-4 rounded-2xl border border-line bg-surface p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold">Net worth over time</h2>
+            <RangeFilter range={range} basePath="/" />
+          </div>
+          <TrendChart label="Net worth" points={series.map((p) => ({ day: p.day, cents: p.netWorthCents }))} />
+          <HistoryTable label="Net worth" rows={series.map((p) => ({ day: p.day, cents: p.netWorthCents }))} />
+        </section>
+
+        {movers.length > 0 && (
+          <section className="rounded-2xl border border-line bg-surface p-5">
+            <h2 className="text-lg font-semibold">What changed</h2>
+            <p className="mt-1 text-sm text-muted">Since {formatDay(from)}, by effect on net worth — a loan paid down counts as a gain.</p>
+            <ul className="mt-3 divide-y divide-line-soft text-sm">
+              {movers.map((c) => {
+                const a = names.get(c.accountId)!;
+                return (
+                  <li key={c.accountId} className="flex items-center gap-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <Link href={`/accounts/${a.id}`} className="hover:underline">
+                        {a.name}
+                      </Link>
+                      <p className="text-xs text-muted">
+                        {a.institutionName}
+                        {c.status === "added" && " · added in this period"}
+                        {c.status === "removed" && " · no longer reported"}
+                      </p>
+                    </div>
+                    <span className={`tabular-nums ${c.effectCents > 0 ? "text-good" : "text-danger"}`}>
+                      {c.effectCents > 0 ? "▲" : "▼"} {formatChange(c.effectCents)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
 
         {broken.length > 0 && (
           <Link
@@ -112,7 +162,9 @@ export default async function OverviewPage() {
                     <li key={a.id} className="flex items-center gap-3 py-2">
                       <div className="min-w-0 flex-1">
                         <p className={a.includeInNetWorth ? "" : "text-muted"}>
-                          {a.name}
+                          <Link href={`/accounts/${a.id}`} className="hover:underline">
+                            {a.name}
+                          </Link>
                           {a.mask && <span className="text-muted"> ··{a.mask}</span>}
                         </p>
                         <p className="text-xs text-muted">

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { PageBody, SiteHeader } from "@/components/SiteHeader";
 import { PlaidLinkForm, PlaidReconnectButton, RefreshButton, TellerButton } from "@/components/LinkButtons";
 import { AddLoanForm, EditLoanForm, type LoanDefaults } from "@/components/LoanForms";
@@ -115,7 +116,9 @@ export default async function AccountsPage() {
                 <li key={a.id} className="flex items-center gap-3 py-2">
                   <div className="min-w-0 flex-1">
                     <p className={a.gone ? "text-muted line-through" : ""}>
-                      {a.name}
+                      <Link href={`/accounts/${a.id}`} className="hover:underline">
+                        {a.name}
+                      </Link>
                       {a.mask && <span className="text-muted"> ··{a.mask}</span>}
                     </p>
                     <p className="text-xs text-muted">
@@ -184,7 +187,10 @@ export default async function AccountsPage() {
                   <div className="flex items-start gap-3">
                     <div className="min-w-0 flex-1">
                       <p className="font-medium">
-                        {loan.name} <span className="text-sm text-muted">· {loan.servicer}</span>
+                        <Link href={`/accounts/${loan.accountId}`} className="hover:underline">
+                          {loan.name}
+                        </Link>{" "}
+                        <span className="text-sm text-muted">· {loan.servicer}</span>
                       </p>
                       <p className="text-xs text-muted">
                         {(loan.schedule.annualRateBps / 100).toFixed(2)}% · {formatCents(loan.schedule.monthlyPaymentCents)}/mo

@@ -300,22 +300,22 @@ export function listAccounts(db: DatabaseSync, userId: number): AccountView[] {
   }));
 }
 
-/** Each account's balance as of `day`: its latest snapshot on or before it. */
-export function balancesOn(db: DatabaseSync, userId: number, day: DateKey) {
+/** Every snapshot of the user's accounts (or one of them) up to `to`. */
+export function snapshots(db: DatabaseSync, userId: number, to: DateKey, accountId?: number) {
   return db
     .prepare(
-      `SELECT a.kind, a.include_in_net_worth, s.balance_cents
-       FROM accounts a
-       LEFT JOIN balance_snapshots s ON s.account_id = a.id
-         AND s.day = (SELECT MAX(day) FROM balance_snapshots WHERE account_id = a.id AND day <= ?)
-       WHERE a.user_id = ? AND a.gone = 0`,
+      `SELECT s.account_id, s.day, s.balance_cents FROM balance_snapshots s
+       JOIN accounts a ON a.id = s.account_id
+       WHERE a.user_id = ? AND s.day <= ? ${accountId === undefined ? "" : "AND a.id = ?"}
+       ORDER BY s.day`,
     )
-    .all(day, userId)
-    .map((r) => ({
-      kind: r.kind as AccountKind,
-      includeInNetWorth: r.include_in_net_worth === 1,
-      balanceCents: (r.balance_cents as number | null) ?? null,
-    }));
+    .all(userId, to, ...(accountId === undefined ? [] : [accountId]))
+    .map((r) => ({ accountId: r.account_id as number, day: r.day as string, balanceCents: r.balance_cents as number }));
+}
+
+/** One of the user's accounts, or null. */
+export function getAccount(db: DatabaseSync, userId: number, accountId: number): AccountView | null {
+  return listAccounts(db, userId).find((a) => a.id === accountId) ?? null;
 }
 
 /** The earliest day this user has any balance for. */

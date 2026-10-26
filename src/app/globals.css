@@ -25,6 +25,10 @@
 
   --danger: #ef4444;
   --good: #3ddc97;
+
+  /* Chart lines: the accent's hue, stepped into the dark band and checked
+     against --surface with the dataviz validator (lightness, ≥3:1). */
+  --chart-line: #24ab72;
 }
 
 @media (prefers-color-scheme: light) {
@@ -47,6 +51,8 @@
 
     --danger: #c42121;
     --good: #0b7a4b;
+
+    --chart-line: #0b7a4b;
   }
 }
 
@@ -63,6 +69,7 @@
   --color-accent-ink: var(--accent-ink);
   --color-danger: var(--danger);
   --color-good: var(--good);
+  --color-chart-line: var(--chart-line);
 
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;

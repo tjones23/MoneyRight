@@ -4,7 +4,6 @@ import { openDatabase } from "./db";
 import { createFirstAdmin, createInvite, redeemInvite, type Ctx } from "./accounts";
 import {
   addScheduledLoan,
-  balancesOn,
   connectionToken,
   connectionsDue,
   countPlaidItem,
@@ -19,6 +18,7 @@ import {
   saveConnection,
   saveLinkedAccounts,
   setIncludeInNetWorth,
+  snapshots,
   updateScheduledLoan,
 } from "./finance";
 import { syncConnection, syncDue, syncScheduledLoans, type Providers } from "./sync";
@@ -93,7 +93,7 @@ describe("accounts and balances", () => {
     expect(accounts.find((a) => a.name === "Checking")?.gone).toBe(false);
   });
 
-  it("keep one snapshot a day, the latest winning, and look up past days", () => {
+  it("keep one snapshot a day, the latest winning", () => {
     const c = link();
     const ids = saveLinkedAccounts(ctx.db, c, [checking], T0);
     const id = ids.get("acc_1")!;
@@ -101,8 +101,8 @@ describe("accounts and balances", () => {
     recordBalance(ctx.db, id, "2026-10-26", 150_00, null, T0);
     recordBalance(ctx.db, id, "2026-10-26", 175_00, null, T0 + 1);
     expect(listAccounts(ctx.db, alex)[0]).toMatchObject({ balanceCents: 175_00, balanceDay: "2026-10-26" });
-    expect(balancesOn(ctx.db, alex, "2026-10-15")[0].balanceCents).toBe(100_00);
-    expect(balancesOn(ctx.db, alex, "2026-09-01")[0].balanceCents).toBeNull();
+    expect(snapshots(ctx.db, alex, "2026-10-15").map((s) => s.balanceCents)).toEqual([100_00]);
+    expect(snapshots(ctx.db, sam, "2026-10-26")).toEqual([]);
   });
 
   it("only change for their owner", () => {

@@ -12,9 +12,10 @@ Hosted the same way as [Outside](https://github.com/tjones23/Outside) and
 [WhatsGood](https://github.com/tjones23/WhatsGood), minus everything that
 would make it public.
 
-> **Status: phase 2 of 4.** Accounts, sign-in, tailnet-only hosting, linked
-> balances (Teller, Plaid), federal-loan projection and the net-worth
-> overview are done. History charts come next — see [docs/PLAN.md](docs/PLAN.md).
+> **Status: phase 3 of 4.** Accounts, sign-in, tailnet-only hosting, linked
+> balances (Teller, Plaid), federal-loan projection, the net-worth overview
+> and history (trend chart, per-account history, what changed) are done.
+> Backups and polish come next — see [docs/PLAN.md](docs/PLAN.md).
 
 ## Setup
 
@@ -156,6 +157,7 @@ src/lib/               pure, framework-free, unit-tested
   amortization.ts      federal-loan projection (simple daily interest)
   account-kinds.ts     Teller/Plaid types → cash, investment, credit, mortgage…
   net-worth.ts         assets − liabilities
+  history.ts           daily series from sparse snapshots; what changed, and why
 src/server/            the database, identity and bank data
   db.ts                node:sqlite, migrations in PRAGMA user_version
   context.ts           data directory, master key, setup code

@@ -33,8 +33,10 @@ change, an extra payment) re-anchors the schedule from that date.
    balance snapshots; reconnect via update mode; the Plaid slot counter;
    the MOHELA schedule; the overview: net worth, change since 30 days ago,
    assets vs. owed, accounts by kind, staleness.
-3. **History.** Net-worth trend chart from snapshots; per-account history;
-   a "what changed" breakdown.
+3. **History — done.** Net-worth trend chart (30 days / 90 days / 1 year /
+   all) with a crosshair tooltip and a table view; per-account history pages;
+   "what changed", which keeps newly linked accounts apart from real change
+   so linking a brokerage doesn't read as a gain.
 4. **Polish.** Encrypted nightly backups (database + key, kept apart);
    export and delete-my-data; a local `reset-2fa` script for a locked-out
    admin; passkeys as an optional second factor; Home Screen polish.
