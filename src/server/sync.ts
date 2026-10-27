@@ -10,7 +10,6 @@ import {
   type ConnectionStatus,
 } from "./finance";
 import { ProviderError } from "./providers/http";
-import { tellerBalanceCents, toLinkedAccount as tellerAccount, type TellerClient } from "./providers/teller";
 import { plaidBalanceCents, toLinkedAccount as plaidAccount, type PlaidClient } from "./providers/plaid";
 import { projectLoan } from "@/lib/amortization";
 import { dateKey } from "@/lib/local-date";
@@ -23,7 +22,6 @@ import { dateKey } from "@/lib/local-date";
  */
 
 export interface Providers {
-  teller: TellerClient | null;
   plaid: PlaidClient | null;
 }
 
@@ -43,14 +41,8 @@ export async function syncConnection(ctx: Ctx, providers: Providers, connection:
   const day = dateKey(now);
   try {
     const token = connectionToken(ctx, connection);
-    let count: number;
-    if (connection.provider === "teller") {
-      if (!providers.teller) throw new ProviderError("teller", 0, "not_configured", false, true);
-      count = await syncTeller(ctx, providers.teller, connection, token, day, now);
-    } else {
-      if (!providers.plaid) throw new ProviderError("plaid", 0, "not_configured", false, true);
-      count = await syncPlaid(ctx, providers.plaid, connection, token, day, now);
-    }
+    if (!providers.plaid) throw new ProviderError("plaid", 0, "not_configured", false, true);
+    const count = await syncPlaid(ctx, providers.plaid, connection, token, day, now);
     recordAttempt(ctx.db, connection.id, { status: "ok" }, now);
     return { status: "ok", code: null, accounts: count };
   } catch (error) {
@@ -63,16 +55,6 @@ export async function syncConnection(ctx: Ctx, providers: Providers, connection:
     recordAttempt(ctx.db, connection.id, { status, code }, now);
     return { status, code, accounts: 0 };
   }
-}
-
-async function syncTeller(ctx: Ctx, teller: TellerClient, connection: Connection, token: string, day: string, now: number) {
-  const accounts = (await teller.listAccounts(token)).filter((a) => a.status === "open");
-  const ids = saveLinkedAccounts(ctx.db, connection, accounts.map(tellerAccount), now);
-  for (const account of accounts) {
-    const { balance, available } = tellerBalanceCents(await teller.balances(token, account.id));
-    if (balance !== null) recordBalance(ctx.db, ids.get(account.id)!, day, balance, available, now);
-  }
-  return accounts.length;
 }
 
 async function syncPlaid(ctx: Ctx, plaid: PlaidClient, connection: Connection, token: string, day: string, now: number) {
@@ -111,8 +93,7 @@ export async function syncDue(ctx: Ctx, providers: Providers, now: number) {
 export async function revokeConnection(ctx: Ctx, providers: Providers, connection: Connection) {
   try {
     const token = connectionToken(ctx, connection);
-    if (connection.provider === "teller") await providers.teller?.removeEnrollment(token);
-    else await providers.plaid?.removeItem(token);
+    await providers.plaid?.removeItem(token);
   } catch (error) {
     console.warn(
       `[moneyright] revoking connection #${connection.id} failed:`,

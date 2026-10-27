@@ -23,13 +23,6 @@ export function isLiability(kind: AccountKind): boolean {
   return kind === "credit" || kind === "mortgage" || kind === "student_loan" || kind === "loan";
 }
 
-/** Teller has two types: depository (checking, savings, …) and credit (cards). */
-export function tellerKind(type: string): AccountKind {
-  if (type === "depository") return "cash";
-  if (type === "credit") return "credit";
-  return "other";
-}
-
 /** Plaid: depository, credit, loan (with subtypes), investment (and the old brokerage), other. */
 export function plaidKind(type: string, subtype: string | null): AccountKind {
   switch (type) {

@@ -12,7 +12,7 @@ import { finishRegistration, startAuthentication, startRegistration } from "./pa
 import { decryptBackup } from "@/lib/backup-format";
 
 const T0 = Date.UTC(2026, 9, 26, 18);
-const none = { teller: null, plaid: null };
+const none = { plaid: null };
 let dir: string;
 let ctx: AppContext;
 let alex: number;
@@ -24,7 +24,7 @@ beforeEach(async () => {
   ctx = createContext(join(dir, "production"), "production");
   alex = await createFirstAdmin(ctx.db, { username: "alex", displayName: "Alex", password: "a long enough password" }, T0);
   sam = await redeemInvite(ctx.db, createInvite(ctx.db, alex, "", T0), { username: "sam", displayName: "Sam", password: "another long password" }, T0);
-  const c = saveConnection(ctx, { userId: alex, provider: "teller", externalId: "enr_1", institutionName: "Chase", accessToken: "token_secret_value" }, T0);
+  const c = saveConnection(ctx, { userId: alex, provider: "plaid", externalId: "item_1", institutionName: "Chase", accessToken: "token_secret_value" }, T0);
   const ids = saveLinkedAccounts(ctx.db, c, [{ externalId: "a1", name: "Checking", kind: "cash", subtype: null, mask: "1234", currency: "USD" }], T0);
   recordBalance(ctx.db, ids.get("a1")!, "2026-10-26", 1234_56, null, T0);
   addScheduledLoan(ctx.db, alex, { name: "Direct Unsub", servicer: "MOHELA", schedule: { principalCents: 100_00, accruedInterestCents: 0, annualRateBps: 500, monthlyPaymentCents: 10_00, paymentDay: 1, anchorDate: "2026-10-01" } }, T0);

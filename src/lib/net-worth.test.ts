@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { plaidKind, tellerKind } from "./account-kinds";
+import { plaidKind } from "./account-kinds";
 import { groupByKind, netWorth } from "./net-worth";
 
 describe("account kinds", () => {
-  it("maps Teller and Plaid types", () => {
-    expect(tellerKind("depository")).toBe("cash");
-    expect(tellerKind("credit")).toBe("credit");
+  it("maps Plaid types", () => {
+    expect(plaidKind("depository", "checking")).toBe("cash");
+    expect(plaidKind("credit", "credit card")).toBe("credit");
     expect(plaidKind("investment", "401k")).toBe("investment");
     expect(plaidKind("loan", "mortgage")).toBe("mortgage");
     expect(plaidKind("loan", "student")).toBe("student_loan");

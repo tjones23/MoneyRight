@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageBody, SiteHeader } from "@/components/SiteHeader";
-import { PlaidLinkForm, PlaidReconnectButton, RefreshButton, TellerButton } from "@/components/LinkButtons";
+import { PlaidLinkForm, PlaidReconnectButton, RefreshButton } from "@/components/LinkButtons";
 import { AddLoanForm, EditLoanForm, type LoanDefaults } from "@/components/LoanForms";
 import { requireUser } from "@/server/auth";
 import { appContext } from "@/server/context";
@@ -14,8 +14,7 @@ import {
   type AccountView,
   type Connection,
 } from "@/server/finance";
-import { plaidConfig, tellerConfig, tellerProblem } from "@/server/providers/config";
-import { tellerNonce } from "@/server/providers/teller";
+import { plaidConfig } from "@/server/providers/config";
 import { deleteLoanAction } from "@/app/actions/loans";
 import { removeConnectionAction, setIncludeAction } from "@/app/actions/linking";
 import { KIND_LABEL } from "@/lib/account-kinds";
@@ -53,9 +52,8 @@ function dollars(cents: number) {
 }
 
 export default async function AccountsPage() {
-  const { user, session } = await requireUser();
+  const { user } = await requireUser();
   const ctx = appContext();
-  const teller = tellerConfig();
   const plaid = plaidConfig();
   const connections = listConnections(ctx.db, user.id);
   const accounts = listAccounts(ctx.db, user.id);
@@ -63,9 +61,6 @@ export default async function AccountsPage() {
   const today = todayKey();
   const used = plaidItemsUsed(ctx.db);
   const slotsLeft = plaid?.environment === "production" ? Math.max(0, PLAID_TRIAL_ITEMS - used) : null;
-  const tellerSettings = teller
-    ? { applicationId: teller.applicationId, environment: teller.environment, nonce: tellerNonce(ctx.key, session.idHash) }
-    : null;
 
   const byConnection = new Map<number, AccountView[]>();
   for (const a of accounts) {
@@ -78,19 +73,11 @@ export default async function AccountsPage() {
     <>
       <SiteHeader user={user} />
       <PageBody title="Accounts" subtitle="Link banks, cards, brokerages and loans. Balances refresh about once a day.">
-        <Section title="Banks and cards" subtitle="Through Teller — Chase, PNC and thousands of others.">
-          {tellerSettings ? (
-            <TellerButton settings={tellerSettings} label="Link a bank or card" />
-          ) : (
-            <SetupHint>Teller isn&apos;t set up yet: {tellerProblem()} See the README&apos;s “Linking accounts”.</SetupHint>
-          )}
-        </Section>
-
         <Section
-          title="Brokerages and loans"
+          title="Link an account"
           subtitle={
             slotsLeft === null
-              ? "Through Plaid — Fidelity, Rocket Mortgage and others Teller can't reach."
+              ? "Through Plaid — banks, cards, brokerages and loans."
               : `Through Plaid — ${slotsLeft} of ${PLAID_TRIAL_ITEMS} free links left. A link is used up for good, even if removed, so reconnect rather than re-link.`
           }
         >
@@ -107,7 +94,7 @@ export default async function AccountsPage() {
             title={c.institutionName}
             subtitle={
               <>
-                {c.provider === "teller" ? "Teller" : "Plaid"} · {statusText(c)}
+                Plaid · {statusText(c)}
               </>
             }
           >
@@ -138,25 +125,12 @@ export default async function AccountsPage() {
               ))}
             </ul>
             <div className="mt-4 flex flex-wrap items-start gap-3">
-              {c.status === "reconnect" &&
-                (c.provider === "teller" ? (
-                  tellerSettings && (
-                    <TellerButton
-                      settings={tellerSettings}
-                      label="Reconnect"
-                      enrollmentId={c.externalId}
-                      connectionId={c.id}
-                      tone="quiet"
-                    />
-                  )
-                ) : (
-                  <PlaidReconnectButton connectionId={c.id} />
-                ))}
+              {c.status === "reconnect" && <PlaidReconnectButton connectionId={c.id} />}
               <RefreshButton connectionId={c.id} />
               <form action={removeConnectionAction}>
                 <input type="hidden" name="connectionId" value={c.id} />
                 <button type="submit" className="rounded-full border border-danger/50 px-3 py-1 text-xs text-danger hover:bg-danger/10">
-                  Remove{c.provider === "plaid" ? " (uses up its Plaid link)" : ""}
+                  Remove (uses up its Plaid link)
                 </button>
               </form>
             </div>

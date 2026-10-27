@@ -14,17 +14,16 @@ import {
   saveConnection,
   setIncludeInNetWorth,
 } from "@/server/finance";
-import { plaidConfig, tellerConfig } from "@/server/providers/config";
+import { plaidConfig } from "@/server/providers/config";
 import { providers } from "@/server/providers";
 import { ProviderError } from "@/server/providers/http";
-import { tellerNonce, verifyTellerSignatures } from "@/server/providers/teller";
 import type { PlaidLinkPurpose } from "@/server/providers/plaid";
 import { revokeConnection, syncConnection } from "@/server/sync";
 
 /**
- * Linking, refreshing and removing connections. The browser runs Teller
- * Connect or Plaid Link and hands the result here; everything that touches a
- * token happens on the server.
+ * Linking, refreshing and removing connections. The browser runs Plaid Link
+ * and hands the result here; everything that touches a token happens on the
+ * server.
  */
 
 export type LinkResult = { ok: true; message?: string } | { ok: false; error: string };
@@ -37,69 +36,13 @@ function failure(error: unknown): LinkResult {
   if (error instanceof AccountError) return { ok: false, error: error.message };
   if (error instanceof ProviderError) {
     console.warn(`[moneyright] ${error.provider} link step failed: ${error.code}`);
-    return { ok: false, error: `${error.provider === "teller" ? "Teller" : "Plaid"} said no (${error.code}). Try again in a minute.` };
+    return { ok: false, error: `Plaid said no (${error.code}). Try again in a minute.` };
   }
   throw error;
 }
 
 function linked(count: number, institution: string): string {
   return `Linked ${institution}: ${count} account${count === 1 ? "" : "s"}.`;
-}
-
-// ---------------------------------------------------------------------------
-// Teller
-// ---------------------------------------------------------------------------
-
-export interface TellerEnrollment {
-  accessToken: string;
-  user: { id: string };
-  enrollment: { id: string; institution: { name: string } };
-  signatures?: string[];
-}
-
-export async function linkTellerAction(enrollment: TellerEnrollment): Promise<LinkResult> {
-  const { user, session, request } = await requireUser();
-  if (!allowAttempt("link", user.username, request)) return { ok: false, error: "Too many tries. Wait a few minutes." };
-  const config = tellerConfig();
-  if (!config) return { ok: false, error: "Teller isn't set up on this server." };
-  const ctx = appContext();
-
-  const accessToken = short(enrollment?.accessToken);
-  const enrollmentId = short(enrollment?.enrollment?.id);
-  const institutionName = short(enrollment?.enrollment?.institution?.name, 80) || "Bank";
-  if (!accessToken || !enrollmentId) return { ok: false, error: "Teller didn't return an enrollment." };
-
-  if (config.signingKey) {
-    const valid = verifyTellerSignatures({
-      signingKey: config.signingKey,
-      signatures: Array.isArray(enrollment.signatures) ? enrollment.signatures.map((s) => short(s, 500)) : [],
-      nonce: tellerNonce(ctx.key, session.idHash),
-      accessToken,
-      userId: short(enrollment?.user?.id),
-      enrollmentId,
-      environment: config.environment,
-    });
-    if (!valid) {
-      logEvent(ctx.db, user.id, "link-refused", Date.now(), "Teller signature didn't verify");
-      return { ok: false, error: "Teller's response couldn't be verified, so it wasn't saved." };
-    }
-  }
-
-  try {
-    const now = Date.now();
-    const connection = saveConnection(
-      ctx,
-      { userId: user.id, provider: "teller", externalId: enrollmentId, institutionName, accessToken },
-      now,
-    );
-    const result = await syncConnection(ctx, providers(), connection, now);
-    logEvent(ctx.db, user.id, "linked", now, `${institutionName} (Teller)`);
-    refresh();
-    if (result.status !== "ok") return { ok: true, message: `Linked ${institutionName}, but the first refresh failed (${result.code}).` };
-    return { ok: true, message: linked(result.accounts, institutionName) };
-  } catch (error) {
-    return failure(error);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +111,7 @@ export async function linkPlaidAction(input: { publicToken: string; institutionN
 }
 
 // ---------------------------------------------------------------------------
-// Either provider
+// Any connection
 // ---------------------------------------------------------------------------
 
 /** After a reconnect in update mode, or the Refresh button. */

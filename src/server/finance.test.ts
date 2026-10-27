@@ -22,7 +22,6 @@ import {
   updateScheduledLoan,
 } from "./finance";
 import { syncConnection, syncDue, syncScheduledLoans, type Providers } from "./sync";
-import { TellerClient } from "./providers/teller";
 import { PlaidClient } from "./providers/plaid";
 import type { Transport } from "./providers/http";
 
@@ -42,10 +41,10 @@ beforeEach(async () => {
   );
 });
 
-function link(userId = alex, externalId = "enr_1") {
+function link(userId = alex, externalId = "item_1") {
   return saveConnection(
     ctx,
-    { userId, provider: "teller", externalId, institutionName: "Chase", accessToken: "token_secret" },
+    { userId, provider: "plaid", externalId, institutionName: "Chase", accessToken: "token_secret" },
     T0,
   );
 }
@@ -158,33 +157,25 @@ describe("scheduled loans", () => {
 });
 
 describe("sync", () => {
-  function tellerFake(routes: Record<string, { status: number; body: unknown }>): Providers {
-    const transport: Transport = async (req) => {
-      const path = new URL(req.url).pathname;
-      const route = routes[path] ?? { status: 404, body: { error: { code: "not_found" } } };
-      return { status: route.status, body: JSON.stringify(route.body) };
-    };
-    const config = { applicationId: "app", environment: "sandbox" as const, certificate: null, privateKey: null, signingKey: null };
-    return { teller: new TellerClient(config, transport), plaid: null };
+  function plaidFake(status: number, body: unknown): Providers {
+    const transport: Transport = async () => ({ status, body: JSON.stringify(body) });
+    return { plaid: new PlaidClient({ clientId: "c", secret: "s", environment: "sandbox" }, transport) };
   }
 
-  const tellerAccount = (id: string, type: string, status = "open") => ({
-    id,
-    enrollment_id: "enr_1",
+  const plaidAccount = (id: string, type: string, current: number | null, available: number | null = null) => ({
+    account_id: id,
     name: id,
+    official_name: null,
+    mask: "0001",
     type,
-    subtype: type === "credit" ? "credit_card" : "checking",
-    last_four: "0001",
-    currency: "USD",
-    status,
-    institution: { id: "chase", name: "Chase" },
+    subtype: type === "credit" ? "credit card" : "checking",
+    balances: { current, available, iso_currency_code: "USD" },
   });
 
-  it("writes today's balance for each open account", async () => {
-    const providers = tellerFake({
-      "/accounts": { status: 200, body: [tellerAccount("acc_1", "depository"), tellerAccount("acc_2", "credit"), tellerAccount("acc_3", "depository", "closed")] },
-      "/accounts/acc_1/balances": { status: 200, body: { account_id: "acc_1", ledger: "1000.50", available: "900.00" } },
-      "/accounts/acc_2/balances": { status: 200, body: { account_id: "acc_2", ledger: "250.00", available: null } },
+  it("writes today's balance for each account", async () => {
+    const providers = plaidFake(200, {
+      accounts: [plaidAccount("acc_1", "depository", 1000.5, 900), plaidAccount("acc_2", "credit", 250)],
+      item: { institution_name: "Chase" },
     });
     const result = await syncConnection(ctx, providers, link(), T0);
     expect(result).toEqual({ status: "ok", code: null, accounts: 2 });
@@ -195,18 +186,16 @@ describe("sync", () => {
     ]);
   });
 
-  it("marks a disconnected enrollment for reconnecting, and doesn't throw", async () => {
-    const providers = tellerFake({
-      "/accounts": { status: 404, body: { error: { code: "enrollment.disconnected.user_action.mfa_required" } } },
-    });
+  it("marks an Item that needs signing in again for reconnecting, and doesn't throw", async () => {
+    const providers = plaidFake(400, { error_type: "ITEM_ERROR", error_code: "ITEM_LOGIN_REQUIRED" });
     const c = link();
     expect(await syncConnection(ctx, providers, c, T0)).toMatchObject({ status: "reconnect" });
-    expect(getConnection(ctx.db, alex, c.id)).toMatchObject({ status: "reconnect", statusCode: "enrollment.disconnected.user_action.mfa_required" });
+    expect(getConnection(ctx.db, alex, c.id)).toMatchObject({ status: "reconnect", statusCode: "ITEM_LOGIN_REQUIRED" });
   });
 
   it("records a missing provider as a passing error", async () => {
     const c = saveConnection(ctx, { userId: alex, provider: "plaid", externalId: "item", institutionName: "Fidelity", accessToken: "a" }, T0);
-    expect(await syncDue(ctx, { teller: null, plaid: null }, T0)).toBe(1);
+    expect(await syncDue(ctx, { plaid: null }, T0)).toBe(1);
     expect(getConnection(ctx.db, alex, c.id)).toMatchObject({ status: "error", statusCode: "not_configured" });
   });
 
@@ -223,7 +212,7 @@ describe("sync", () => {
     });
     const plaid = new PlaidClient({ clientId: "c", secret: "s", environment: "sandbox" }, transport);
     const c = saveConnection(ctx, { userId: alex, provider: "plaid", externalId: "item", institutionName: "Fidelity", accessToken: "a" }, T0);
-    await syncConnection(ctx, { teller: null, plaid }, c, T0);
+    await syncConnection(ctx, { plaid }, c, T0);
     expect(listAccounts(ctx.db, alex).map((a) => [a.kind, a.balanceCents])).toEqual([
       ["investment", 50123_45],
       ["mortgage", 301000_00],

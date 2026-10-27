@@ -13,7 +13,7 @@ import type { DateKey } from "@/lib/local-date";
  * by guessing an id.
  */
 
-export type Provider = "teller" | "plaid";
+export type Provider = "plaid";
 export type ConnectionStatus = "ok" | "reconnect" | "error";
 
 export interface Connection {

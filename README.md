@@ -5,8 +5,8 @@ the mortgage and student loans, on one page, for you and anyone you invite.
 
 It runs on your own Mac and is reachable only from that Mac and your
 tailnet — never the public internet. It pays for nothing: bank links use
-free developer tiers (Teller, Plaid's Trial plan), and federal student loans,
-which no free aggregator covers, follow their amortization schedule.
+Plaid's free Trial plan, and federal student loans, which no free
+aggregator covers, follow their amortization schedule.
 
 Hosted the same way as [Outside](https://github.com/tjones23/Outside) and
 [WhatsGood](https://github.com/tjones23/WhatsGood), minus everything that
@@ -45,26 +45,23 @@ Nothing is required in `.env.local`; `.env.example` lists the options.
 
 | Where | Through | What you need |
 | --- | --- | --- |
-| Banks and cards (Chase, PNC…) | [Teller](https://teller.io) | A free developer account: the application id, and the client certificate + key it gives you |
-| Brokerages, mortgages, loans (Fidelity, Rocket Mortgage…) | [Plaid](https://plaid.com) Trial | Client id and secret; Production access via the free Trial plan |
+| Banks, cards, brokerages, mortgages, loans (Chase, Fidelity, Rocket Mortgage…) | [Plaid](https://plaid.com) Trial | Client id and secret; Production access via the free Trial plan |
 | Federal student loans (MOHELA) | MoneyRight itself | The servicer's numbers, entered once on the Accounts page |
 
-1. **Teller:** sign up at teller.io, create an application, download the
-   certificate. Put `certificate.pem` and `private_key.pem` in
-   `.moneyright/teller/` (owner-only: `chmod 600`), and set
-   `TELLER_APPLICATION_ID` in `.env.local`. The `development` environment —
-   the default — is free and real, up to 100 enrollments.
-2. **Plaid:** sign up at dashboard.plaid.com, request the Trial plan, set
+1. **Plaid:** sign up at dashboard.plaid.com, request the Trial plan, set
    `PLAID_CLIENT_ID`, `PLAID_SECRET` and `PLAID_ENV=production` in
    `.env.local`. Some institutions (Fidelity among them) connect by OAuth,
    which Plaid enables only after your dashboard's application profile is
    filled in — check its OAuth institutions page.
-3. `./run-prod.command restart`, then **Accounts** in the app.
+2. `./run-prod.command restart`, then **Accounts** in the app.
 
 **Plaid's 10 links are for life.** Removing a Plaid connection doesn't give
 its slot back, so the Accounts page shows how many are left, and a broken
-connection is *reconnected* (same slot), never re-linked. Teller covers
-banks and cards so Plaid's slots go to what only it can reach.
+connection is *reconnected* (same slot), never re-linked. Spend them on the
+institutions that matter most.
+
+Teller, which once covered banks and cards for free, shut down its API in
+September 2026; MoneyRight no longer uses it.
 
 **Federal loans** are projected: simple daily interest, payments to interest
 first — how Direct Loans work. Add each loan with its principal, unpaid
@@ -76,12 +73,11 @@ Balances refresh by themselves about once a day (hourly retries after a
 failure), from a timer inside the server — nothing outside the tailnet can
 call in, so there are no webhooks. Plaid's balances are its free cached
 ones, which it updates about daily; MoneyRight never calls Plaid's billed
-real-time balance endpoint. Both the Teller and Plaid CDNs are allowed in
-the CSP, and only they.
+real-time balance endpoint. Plaid's CDN is allowed in the CSP, and only it.
 
 For the dev server, put sandbox keys in `.env.development.local`
-(`TELLER_ENVIRONMENT=sandbox`, `PLAID_ENV=sandbox`) — sandbox links use test
-banks and don't count toward any limit.
+(`PLAID_ENV=sandbox`) — sandbox links use test banks and don't count toward
+any limit.
 
 ## Backups, restores and getting back in
 
@@ -134,7 +130,7 @@ MoneyRight; admins can remove other people under People.
 | **Sessions** | Random 256-bit cookie, stored only as a hash. `HttpOnly`, `SameSite=Strict`, `Secure` over the tailnet. Idle timeout 3 days, hard limit 14. A session only works from the tailnet login that signed in. Changing your password signs out everything else. |
 | **Guessing** | Sign-in, code and setup attempts are rate-limited per account and per device. |
 | **At rest** | SQLite in `.moneyright/<env>/`, owner-only (0700/0600), gitignored. Secrets the app must read back — TOTP secrets and every bank access token — are sealed with AES-256-GCM under `master.key`, each bound to its row. Tokens never reach the browser after linking, and logs carry only error codes, never balances or names. |
-| **Headers** | CSP with a per-request script nonce; the only outside scripts and frames are Teller's and Plaid's own CDNs. `no-store` on every page, HSTS on the tailnet, no framing. |
+| **Headers** | CSP with a per-request script nonce; the only outside scripts and frames are Plaid's own CDN. `no-store` on every page, HSTS on the tailnet, no framing. |
 
 **Back up `master.key` with the database.** Without it the sealed fields
 can't be read; the server refuses to start rather than make a new one.
@@ -194,7 +190,7 @@ src/lib/               pure, framework-free, unit-tested
   security-headers.ts  CSP and the rest
   money.ts             integer cents in, dollars out
   amortization.ts      federal-loan projection (simple daily interest)
-  account-kinds.ts     Teller/Plaid types → cash, investment, credit, mortgage…
+  account-kinds.ts     Plaid types → cash, investment, credit, mortgage…
   net-worth.ts         assets − liabilities
   history.ts           daily series from sparse snapshots; what changed, and why
   backup-format.ts     the encrypted backup file, and which ones to keep
@@ -209,7 +205,7 @@ src/server/            the database, identity and bank data
   backup.ts            backups: consistent copy, encrypt, prune
   passkeys.ts          WebAuthn registration and sign-in (SimpleWebAuthn)
   my-data.ts           export, and deleting data, accounts and people
-  providers/           Teller (mTLS) and Plaid clients over one HTTPS transport
+  providers/           the Plaid client over one HTTPS transport
 src/app/               pages and Server Actions
 src/proxy.ts           the network gate and headers, on every request
 src/instrumentation.ts opens the database and writes the setup code at startup

@@ -5,23 +5,19 @@
  * carries a per-request nonce, which a static config can't produce.
  *
  * Stricter than Outside's: MoneyRight loads nothing from anywhere but itself
- * except the two bank-linking widgets below — no map tiles, no remote images
+ * except the bank-linking widget below — no map tiles, no remote images
  * — and it has no plain-HTTP LAN address, so HSTS is safe whenever the
  * request arrived over HTTPS (the tailnet).
  */
 
 /**
- * Teller Connect and Plaid Link: each a script from its own CDN that opens an
- * iframe on its own origin, where the person signs in to their bank. Both
- * vendors require loading the script from them, not bundling it.
+ * Plaid Link: a script from Plaid's CDN that opens an iframe on its own
+ * origin, where the person signs in to their bank. Plaid requires loading
+ * the script from them, not bundling it.
  */
-export const LINK_SCRIPT_HOSTS = ["https://cdn.teller.io", "https://cdn.plaid.com"] as const;
-export const LINK_FRAME_HOSTS = ["https://teller.io", "https://*.teller.io", "https://cdn.plaid.com"] as const;
-export const LINK_CONNECT_HOSTS = [
-  "https://*.teller.io",
-  "https://production.plaid.com",
-  "https://sandbox.plaid.com",
-] as const;
+export const LINK_SCRIPT_HOSTS = ["https://cdn.plaid.com"] as const;
+export const LINK_FRAME_HOSTS = ["https://cdn.plaid.com"] as const;
+export const LINK_CONNECT_HOSTS = ["https://production.plaid.com", "https://sandbox.plaid.com"] as const;
 
 export interface HeaderOptions {
   /** Per-request nonce, base64. */
@@ -43,10 +39,9 @@ export function contentSecurityPolicy({ nonce, isDev }: HeaderOptions): string {
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' ${REACT_TIMING_HASH} ${LINK_SCRIPT_HOSTS.join(" ")}${isDev ? " 'unsafe-eval'" : ""}`,
     /*
-     * Styles may be inline: Plaid Link and Teller Connect inject their own
-     * overlay styles without our nonce (as does Next's dev overlay). Inline
-     * CSS can't run script — scripts above still need the nonce or one of
-     * the two vendor hosts.
+     * Styles may be inline: Plaid Link injects its own overlay styles
+     * without our nonce (as does Next's dev overlay). Inline CSS can't run
+     * script — scripts above still need the nonce or the vendor host.
      */
     "style-src 'self' 'unsafe-inline'",
     "style-src-attr 'unsafe-inline'",

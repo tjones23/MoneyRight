@@ -39,7 +39,7 @@ export default async function AccountPage({ params, searchParams }: PageProps<"/
       ? account.balanceCents - firstKnown.balanceCents!
       : null;
   const label = owed ? "Owed" : "Balance";
-  const source = account.source === "schedule" ? "Projected from its schedule" : account.source === "teller" ? "Through Teller" : "Through Plaid";
+  const source = account.source === "schedule" ? "Projected from its schedule" : "Through Plaid";
 
   return (
     <>

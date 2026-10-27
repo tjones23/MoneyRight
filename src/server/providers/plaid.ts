@@ -5,9 +5,9 @@ import { dollarsToCents } from "@/lib/money";
 import type { LinkedAccount } from "../finance";
 
 /**
- * Plaid (https://plaid.com/docs/api): brokerages, retirement accounts,
- * mortgages and loans — what Teller doesn't cover. On the free Trial plan,
- * with 10 Items for life, so it's kept for those.
+ * Plaid (https://plaid.com/docs/api): banks, cards, brokerages, retirement
+ * accounts, mortgages and loans. On the free Trial plan, with 10 Items for
+ * life, so each link should be one worth having.
  *
  * Balances come from /accounts/get, which is free and returns what Plaid
  * last fetched (about daily, for Items with Investments, Liabilities or

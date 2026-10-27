@@ -3,34 +3,27 @@
 import { useState, useTransition } from "react";
 import {
   linkPlaidAction,
-  linkTellerAction,
   plaidLinkTokenAction,
   refreshConnectionAction,
   type LinkResult,
-  type TellerEnrollment,
 } from "@/app/actions/linking";
 import type { PlaidLinkPurpose } from "@/server/providers/plaid";
 
 /**
- * The buttons that open Teller Connect and Plaid Link. Their scripts load
- * only when a button is first pressed, straight from each vendor's CDN (both
- * require that; the CSP allows exactly those two hosts).
+ * The buttons that open Plaid Link. Its script loads only when a button is
+ * first pressed, straight from Plaid's CDN (Plaid requires that; the CSP
+ * allows exactly that host).
  */
 
-interface TellerConnectApi {
-  setup(options: Record<string, unknown>): { open(): void };
-}
 interface PlaidApi {
   create(options: Record<string, unknown>): { open(): void; destroy(): void };
 }
 declare global {
   interface Window {
-    TellerConnect?: TellerConnectApi;
     Plaid?: PlaidApi;
   }
 }
 
-const TELLER_SCRIPT = "https://cdn.teller.io/connect/connect.js";
 const PLAID_SCRIPT = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
 
 const loading = new Map<string, Promise<void>>();
@@ -67,65 +60,6 @@ const buttonStyles = {
 };
 
 // ---------------------------------------------------------------------------
-// Teller
-// ---------------------------------------------------------------------------
-
-export interface TellerSettings {
-  applicationId: string;
-  environment: string;
-  nonce: string;
-}
-
-/** New link, or — with `enrollmentId` and `connectionId` — reconnect an existing one. */
-export function TellerButton({
-  settings,
-  label,
-  enrollmentId,
-  connectionId,
-  tone = "primary",
-}: {
-  settings: TellerSettings;
-  label: string;
-  enrollmentId?: string;
-  connectionId?: number;
-  tone?: keyof typeof buttonStyles;
-}) {
-  const [pending, startTransition] = useTransition();
-  const [result, setResult] = useState<LinkResult | null>(null);
-
-  async function open() {
-    setResult(null);
-    try {
-      await loadScript(TELLER_SCRIPT);
-    } catch (error) {
-      setResult({ ok: false, error: (error as Error).message });
-      return;
-    }
-    window.TellerConnect!.setup({
-      applicationId: settings.applicationId,
-      environment: settings.environment,
-      products: ["balance"],
-      nonce: settings.nonce,
-      ...(enrollmentId ? { enrollmentId } : {}),
-      onSuccess: (enrollment: TellerEnrollment) =>
-        startTransition(async () => {
-          // A reconnect keeps the same token; a fresh refresh is all it needs.
-          setResult(connectionId ? await refreshConnectionAction(connectionId) : await linkTellerAction(enrollment));
-        }),
-    }).open();
-  }
-
-  return (
-    <div className="space-y-2">
-      <button type="button" onClick={open} disabled={pending} className={buttonStyles[tone]}>
-        {pending ? "Saving…" : label}
-      </button>
-      <Message result={result} />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Plaid
 // ---------------------------------------------------------------------------
 
@@ -148,13 +82,13 @@ async function openPlaid(linkToken: string): Promise<{ publicToken: string; inst
 }
 
 const PURPOSES: { value: PlaidLinkPurpose; label: string }[] = [
+  { value: "bank", label: "Bank or credit card (Chase, PNC…)" },
   { value: "investments", label: "Brokerage or retirement (Fidelity…)" },
   { value: "liabilities", label: "Mortgage or loan (Rocket Mortgage…)" },
-  { value: "bank", label: "Bank Teller doesn't support" },
 ];
 
 export function PlaidLinkForm({ slotsLeft }: { slotsLeft: number | null }) {
-  const [purpose, setPurpose] = useState<PlaidLinkPurpose>("investments");
+  const [purpose, setPurpose] = useState<PlaidLinkPurpose>("bank");
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<LinkResult | null>(null);
 

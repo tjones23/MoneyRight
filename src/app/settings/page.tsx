@@ -140,7 +140,7 @@ export default async function SettingsPage() {
             </div>
             <details>
               <summary className="cursor-pointer font-medium">Remove all my financial data</summary>
-              <p className="my-3 text-muted">Revokes every bank link at Teller and Plaid and deletes your accounts, balances and loans. Your sign-in stays. Plaid links used stay used.</p>
+              <p className="my-3 text-muted">Revokes every bank link at Plaid and deletes your accounts, balances and loans. Your sign-in stays. Plaid links used stay used.</p>
               <DeleteFinancialDataForm />
             </details>
             <details>

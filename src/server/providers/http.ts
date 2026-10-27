@@ -1,8 +1,8 @@
 import { request } from "node:https";
 
 /**
- * The one way MoneyRight talks to a bank-data provider: HTTPS with an
- * optional client certificate (Teller's mTLS), a timeout, and nothing logged.
+ * The one way MoneyRight talks to a bank-data provider: HTTPS with a
+ * timeout, and nothing logged.
  * Behind an interface so the sync code can be tested against fakes.
  */
 
@@ -11,9 +11,6 @@ export interface HttpRequest {
   url: string;
   headers?: Record<string, string>;
   body?: string;
-  /** PEM client certificate and key, for mutual TLS. */
-  certificate?: Buffer | null;
-  privateKey?: Buffer | null;
 }
 
 export interface HttpResponse {
@@ -35,8 +32,6 @@ export const httpsTransport: Transport = (req) =>
       {
         method: req.method,
         headers: { Accept: "application/json", ...req.headers },
-        cert: req.certificate ?? undefined,
-        key: req.privateKey ?? undefined,
         timeout: TIMEOUT_MS,
       },
       (res) => {
@@ -66,7 +61,7 @@ export const httpsTransport: Transport = (req) =>
  */
 export class ProviderError extends Error {
   constructor(
-    readonly provider: "teller" | "plaid",
+    readonly provider: "plaid",
     readonly status: number,
     readonly code: string,
     /** The person has to sign in to their bank again (update mode). */
