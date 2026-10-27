@@ -14,6 +14,9 @@ would make it public.
 
 > **Status: all four phases done** — see [docs/PLAN.md](docs/PLAN.md).
 
+> **Setting it up on the host Mac with an agent?** Point it at
+> [docs/HOSTING-HANDOFF.md](docs/HOSTING-HANDOFF.md).
+
 ## Setup
 
 Needs Node 24.7 or newer (for the built-in `node:sqlite` and argon2).
