@@ -1,7 +1,8 @@
 import type { Ctx } from "./accounts";
 import { AccountError, getUser, listUsers, logEvent, recentEvents } from "./accounts";
 import { transaction } from "./db";
-import { listAccounts, listConnections, listScheduledLoans, snapshots } from "./finance";
+import { listAccounts, listAssets, listConnections, listScheduledLoans, snapshots } from "./finance";
+import { pruneHomeIndex } from "./home-index";
 import { listPasskeys } from "./passkeys";
 import { revokeConnection, type Providers } from "./sync";
 import { verifyPassword } from "@/lib/password";
@@ -53,6 +54,16 @@ export function exportUserData(ctx: Ctx, userId: number) {
       paymentDay: l.schedule.paymentDay,
       asOf: l.schedule.anchorDate,
     })),
+    assets: listAssets(ctx.db, userId).map((a) => ({
+      accountId: a.accountId,
+      name: a.name,
+      kind: a.kind,
+      value: a.valuation.valueCents / 100,
+      asOf: a.valuation.asOf,
+      method: a.valuation.method,
+      depreciationPercentPerYear: a.valuation.method === "depreciation" ? a.valuation.annualRateBps / 100 : null,
+      zip: a.valuation.zip,
+    })),
     passkeys: listPasskeys(ctx.db, userId).map((p) => ({ name: p.name, host: p.rpId, addedAt: new Date(p.createdAt).toISOString() })),
     securityEvents: recentEvents(ctx.db, userId, 1000).map((e) => ({ at: new Date(e.at).toISOString(), event: e.event, detail: e.detail })),
   };
@@ -64,6 +75,7 @@ export async function deleteFinancialData(ctx: Ctx, providers: Providers, userId
   transaction(ctx.db, () => {
     ctx.db.prepare("DELETE FROM connections WHERE user_id = ?").run(userId);
     ctx.db.prepare("DELETE FROM accounts WHERE user_id = ?").run(userId);
+    pruneHomeIndex(ctx.db);
     logEvent(ctx.db, userId, "financial-data-deleted", now);
   });
 }
@@ -88,6 +100,7 @@ export async function deleteUser(ctx: Ctx, providers: Providers, userId: number)
   for (const connection of listConnections(ctx.db, userId)) await revokeConnection(ctx, providers, connection);
   // Everything else hangs off users with ON DELETE CASCADE.
   ctx.db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+  pruneHomeIndex(ctx.db);
 }
 
 export async function deleteOwnAccount(ctx: Ctx, providers: Providers, userId: number, password: string) {

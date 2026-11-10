@@ -47,6 +47,7 @@ Nothing is required in `.env.local`; `.env.example` lists the options.
 | --- | --- | --- |
 | Banks, cards, brokerages, mortgages, loans (Chase, Fidelity, Rocket Mortgage…) | [Plaid](https://plaid.com) Trial | Client id and secret; Production access via the free Trial plan |
 | Federal student loans (MOHELA) | MoneyRight itself | The servicer's numbers, entered once on the Accounts page |
+| Homes, vehicles, other assets | MoneyRight itself (homes follow Zillow's free ZIP-code index) | A value as of a date, entered on the Accounts page |
 
 1. **Plaid:** sign up at dashboard.plaid.com, request the Trial plan, set
    `PLAID_CLIENT_ID`, `PLAID_SECRET` and `PLAID_ENV=production` in
@@ -68,6 +69,21 @@ first — how Direct Loans work. Add each loan with its principal, unpaid
 interest, rate, payment and payment day, as of a date. If MOHELA's number
 ever drifts (forbearance, an IDR change, an extra payment), open the loan,
 correct what differs and save; it projects from there.
+
+**Homes, vehicles and other assets** are estimated from one value you enter
+(an appraisal, a purchase price, a Kelley Blue Book or Consumer Reports
+lookup) — no free service prices a particular house or car. After that:
+
+- a **home** follows its ZIP code's Zillow Home Value Index (ZHVI): value ×
+  index now ÷ index the month it was valued. The server downloads Zillow's
+  free national ZIP file (~125 MB, a few seconds) weekly, keeps only the ZIP
+  codes in use, and so never sends anyone's ZIP anywhere. Zillow updates it
+  around the 16th of each month; if it moves the file, set
+  `MONEYRIGHT_HOME_INDEX_URL`.
+- a **vehicle** loses a share of its value each year (15% by default,
+  compounding); after six months the Accounts page suggests looking it up
+  again.
+- anything else holds its value until you update it.
 
 Balances refresh by themselves about once a day (hourly retries after a
 failure), from a timer inside the server — nothing outside the tailnet can
@@ -190,7 +206,8 @@ src/lib/               pure, framework-free, unit-tested
   security-headers.ts  CSP and the rest
   money.ts             integer cents in, dollars out
   amortization.ts      federal-loan projection (simple daily interest)
-  account-kinds.ts     Plaid types → cash, investment, credit, mortgage…
+  valuation.ts         asset estimates: fixed, yearly depreciation, home index
+  account-kinds.ts     Plaid types → cash, investment, property, credit, mortgage…
   net-worth.ts         assets − liabilities
   history.ts           daily series from sparse snapshots; what changed, and why
   backup-format.ts     the encrypted backup file, and which ones to keep
@@ -199,7 +216,8 @@ src/server/            the database, identity and bank data
   context.ts           data directory, master key, setup code
   accounts.ts          users, sessions, invites, second factor — no Next imports
   auth.ts              the data access layer: cookies, requireUser, rate limits
-  finance.ts           connections, accounts, daily snapshots, loan schedules
+  finance.ts           connections, accounts, daily snapshots, loan schedules, assets
+  home-index.ts        Zillow's ZIP-code home value index: download, parse, keep what's used
   sync.ts              one refresh pass: fetch, snapshot, record errors by code
   scheduler.ts         the hourly timer that runs it, and the nightly backup
   backup.ts            backups: consistent copy, encrypt, prune

@@ -161,6 +161,28 @@ const MIGRATIONS: string[] = [
   ALTER TABLE sessions ADD COLUMN webauthn_challenge TEXT;
   ALTER TABLE sessions ADD COLUMN webauthn_challenge_at INTEGER;
   `,
+  // 5: homes, vehicles and other things owned, valued from one known point.
+  `
+  CREATE TABLE asset_valuations (
+    account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    value_cents INTEGER NOT NULL,
+    as_of TEXT NOT NULL,
+    method TEXT NOT NULL CHECK (method IN ('fixed', 'depreciation', 'home_index')),
+    -- Depreciation per year in hundredths of a percent; 0 unless method is depreciation.
+    annual_rate_bps INTEGER NOT NULL DEFAULT 0,
+    -- Five-digit ZIP code, for the home value index.
+    zip TEXT,
+    updated_at INTEGER NOT NULL
+  );
+
+  -- Zillow's home value index, monthly, for the ZIP codes someone has a home in.
+  CREATE TABLE home_value_index (
+    zip TEXT NOT NULL,
+    month TEXT NOT NULL,
+    value REAL NOT NULL,
+    PRIMARY KEY (zip, month)
+  );
+  `,
 ];
 
 export function openDatabase(path: string): DatabaseSync {

@@ -170,6 +170,7 @@ export default async function OverviewPage({ searchParams }: PageProps<"/">) {
                         <p className="text-xs text-muted">
                           {a.institutionName}
                           {a.source === "schedule" && " · projected"}
+                          {a.source === "estimate" && " · estimated"}
                           {!a.includeInNetWorth && " · not counted"}
                           {note && ` · ${note}`}
                         </p>

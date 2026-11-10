@@ -38,8 +38,11 @@ export default async function AccountPage({ params, searchParams }: PageProps<"/
     firstKnown && account.balanceCents !== null && daysBetween(firstKnown.day, today) > 0
       ? account.balanceCents - firstKnown.balanceCents!
       : null;
-  const label = owed ? "Owed" : "Balance";
-  const source = account.source === "schedule" ? "Projected from its schedule" : "Through Plaid";
+  const estimated = account.source === "estimate";
+  const label = owed ? "Owed" : estimated ? "Estimated value" : "Balance";
+  const source = { schedule: "Projected from its schedule", estimate: "Estimated from the value you entered", plaid: "Through Plaid" }[
+    account.source
+  ];
 
   return (
     <>
