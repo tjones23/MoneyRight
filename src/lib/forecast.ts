@@ -80,7 +80,8 @@ function projector(account: ForecastAccount, assumptions: Assumptions, today: Da
   const m = account.method;
   if (m.type === "schedule") return (day) => (day === today ? now : projectLoan(m.schedule, day).balanceCents);
   if (m.type === "asset") {
-    if (m.valuation.method !== "home_index") return (day) => (day === today ? now : estimateAsset(m.valuation, day).valueCents);
+    const home = m.valuation.method === "home_index" || m.valuation.method === "address";
+    if (!home) return (day) => (day === today ? now : estimateAsset(m.valuation, day).valueCents);
     // Today's estimate from the index, then its recent rate onward (only if there's a reading to grow from).
     const growth = indexAt(m.index, today) ? homeGrowthRate(m.index) : 0;
     return (day) => Math.round(now * Math.pow(1 + growth, years(day)));

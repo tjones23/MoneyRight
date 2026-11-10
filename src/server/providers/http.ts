@@ -61,7 +61,7 @@ export const httpsTransport: Transport = (req) =>
  */
 export class ProviderError extends Error {
   constructor(
-    readonly provider: "plaid",
+    readonly provider: "plaid" | "rentcast",
     readonly status: number,
     readonly code: string,
     /** The person has to sign in to their bank again (update mode). */

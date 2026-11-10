@@ -47,7 +47,8 @@ Nothing is required in `.env.local`; `.env.example` lists the options.
 | --- | --- | --- |
 | Banks, cards, brokerages, mortgages, loans (Chase, Fidelity, Rocket Mortgage…) | [Plaid](https://plaid.com) Trial | Client id and secret; Production access via the free Trial plan |
 | Federal student loans (MOHELA) | MoneyRight itself | The servicer's numbers, entered once on the Accounts page |
-| Homes, vehicles, other assets | MoneyRight itself (homes follow Zillow's free ZIP-code index) | A value as of a date, entered on the Accounts page |
+| Homes | [RentCast](https://www.rentcast.io/api) free Developer plan, by address | `RENTCAST_API_KEY`; without it, a value you enter that follows Zillow's free ZIP-code index |
+| Vehicles, other assets | MoneyRight itself | A value as of a date, entered on the Accounts page |
 
 1. **Plaid:** sign up at dashboard.plaid.com, request the Trial plan, set
    `PLAID_CLIENT_ID`, `PLAID_SECRET` and `PLAID_ENV=production` in
@@ -70,11 +71,27 @@ interest, rate, payment and payment day, as of a date. If MOHELA's number
 ever drifts (forbearance, an IDR change, an extra payment), open the loan,
 correct what differs and save; it projects from there.
 
-**Homes, vehicles and other assets** are estimated from one value you enter
-(an appraisal, a purchase price, a Kelley Blue Book or Consumer Reports
-lookup) — no free service prices a particular house or car. After that:
+**A home from its address.** Zillow's Zestimate has no API outside Zillow's
+partner program (MLS or brokerage credentials), so MoneyRight uses
+RentCast's estimate instead — the same kind of automated valuation from
+nearby sales, with a likely range:
 
-- a **home** follows its ZIP code's Zillow Home Value Index (ZHVI): value ×
+1. Sign up at rentcast.io/api, choose the free **Developer** plan (50
+   requests a month) and create an API key.
+2. Put `RENTCAST_API_KEY=…` in `.env.local` and `./run-prod.command restart`.
+3. On **Accounts → Add an asset**, a home defaults to *Look its value up
+   from its address*: enter street, city, state and ZIP.
+
+It's looked up when added and again each month. RentCast bills every
+request past 50 and has no cap of its own, so MoneyRight counts its lookups
+and stops at 40 a month (the Accounts page shows how many are used); a
+failed lookup keeps the last value and is retried the next day. The address
+is the only thing sent to RentCast.
+
+**Otherwise, assets are estimated from one value you enter** (an appraisal,
+a purchase price, a Kelley Blue Book or Consumer Reports lookup). After that:
+
+- a **home** without address lookup follows its ZIP code's Zillow Home Value Index (ZHVI): value ×
   index now ÷ index the month it was valued. The server downloads Zillow's
   free national ZIP file (~125 MB, a few seconds) weekly, keeps only the ZIP
   codes in use, and so never sends anyone's ZIP anywhere. Zillow updates it
@@ -233,6 +250,7 @@ src/server/            the database, identity and bank data
   auth.ts              the data access layer: cookies, requireUser, rate limits
   finance.ts           connections, accounts, daily snapshots, loan schedules, assets
   home-index.ts        Zillow's ZIP-code home value index: download, parse, keep what's used
+  home-estimates.ts    homes valued by address through RentCast: monthly, capped at 40 a month
   transactions.ts      Plaid transaction sync results, stored and read per user
   planning.ts          forecast assumptions, goals, and the forecast's inputs
   sync.ts              one refresh pass: fetch, snapshot, record errors by code
@@ -240,7 +258,7 @@ src/server/            the database, identity and bank data
   backup.ts            backups: consistent copy, encrypt, prune
   passkeys.ts          WebAuthn registration and sign-in (SimpleWebAuthn)
   my-data.ts           export, and deleting data, accounts and people
-  providers/           the Plaid client over one HTTPS transport
+  providers/           the Plaid and RentCast clients over one HTTPS transport
 src/app/               pages and Server Actions
 src/proxy.ts           the network gate and headers, on every request
 src/instrumentation.ts opens the database and writes the setup code at startup

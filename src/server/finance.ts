@@ -492,6 +492,8 @@ export interface Asset {
   includeInNetWorth: boolean;
   valuation: AssetValuation;
   updatedAt: number;
+  /** For a home valued from its address. */
+  estimate: AddressEstimate | null;
 }
 
 export interface AssetDetails {
@@ -508,12 +510,52 @@ function assetDescription(details: AssetDetails): string {
 
 function writeValuation(db: DatabaseSync, accountId: number, v: AssetValuation, now: number) {
   db.prepare(
-    `INSERT INTO asset_valuations (account_id, value_cents, as_of, method, annual_rate_bps, zip, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO asset_valuations (account_id, value_cents, as_of, method, annual_rate_bps, zip, address, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (account_id) DO UPDATE SET
        value_cents = excluded.value_cents, as_of = excluded.as_of, method = excluded.method,
-       annual_rate_bps = excluded.annual_rate_bps, zip = excluded.zip, updated_at = excluded.updated_at`,
-  ).run(accountId, v.valueCents, v.asOf, v.method, v.method === "depreciation" ? v.annualRateBps : 0, v.zip, now);
+       annual_rate_bps = excluded.annual_rate_bps, zip = excluded.zip, address = excluded.address,
+       updated_at = excluded.updated_at`,
+  ).run(
+    accountId,
+    v.valueCents,
+    v.asOf,
+    v.method,
+    v.method === "depreciation" ? v.annualRateBps : 0,
+    v.zip,
+    v.method === "address" ? (v.address ?? null) : null,
+    now,
+  );
+}
+
+/** The outcome of looking a home's value up by its address. */
+export interface AddressEstimate {
+  lowCents: number | null;
+  highCents: number | null;
+  attemptAt: number | null;
+  /** Null after a success. */
+  error: string | null;
+}
+
+/** Records a fresh estimate (the value, as of `day`) or, with `error`, a failed one that keeps the last value. */
+export function recordAddressEstimate(
+  db: DatabaseSync,
+  accountId: number,
+  outcome: { valueCents: number; lowCents: number | null; highCents: number | null; zip: string | null; day: string } | { error: string },
+  now: number,
+) {
+  if ("error" in outcome) {
+    db.prepare("UPDATE asset_valuations SET estimate_attempt_at = ?, estimate_error = ? WHERE account_id = ?").run(
+      now,
+      outcome.error,
+      accountId,
+    );
+    return;
+  }
+  db.prepare(
+    `UPDATE asset_valuations SET value_cents = ?, as_of = ?, zip = COALESCE(?, zip), estimate_low_cents = ?, estimate_high_cents = ?,
+       estimate_attempt_at = ?, estimate_error = NULL WHERE account_id = ?`,
+  ).run(outcome.valueCents, outcome.day, outcome.zip, outcome.lowCents, outcome.highCents, now, accountId);
 }
 
 export function addAsset(db: DatabaseSync, userId: number, details: AssetDetails, now: number): number {
@@ -528,7 +570,14 @@ export function addAsset(db: DatabaseSync, userId: number, details: AssetDetails
 }
 
 /** A new value as of a date (or a new way of estimating), from which the estimate resumes. */
-export function updateAsset(db: DatabaseSync, userId: number, accountId: number, details: AssetDetails, now: number) {
+export function updateAsset(
+  db: DatabaseSync,
+  userId: number,
+  accountId: number,
+  details: AssetDetails,
+  now: number,
+  { keepHistory = false }: { keepHistory?: boolean } = {},
+) {
   transaction(db, () => {
     const updated = db
       .prepare(
@@ -539,7 +588,10 @@ export function updateAsset(db: DatabaseSync, userId: number, accountId: number,
     if (updated.changes !== 1) throw new AccountError("That asset doesn't exist.");
     writeValuation(db, accountId, details.valuation, now);
     // Estimates after the new value's date came from the old one; they're redone on the next refresh.
-    db.prepare("DELETE FROM balance_snapshots WHERE account_id = ? AND day >= ?").run(accountId, details.valuation.asOf);
+    // Unless the value didn't change (a rename): then they still stand.
+    if (!keepHistory) {
+      db.prepare("DELETE FROM balance_snapshots WHERE account_id = ? AND day >= ?").run(accountId, details.valuation.asOf);
+    }
     pruneHomeIndex(db);
   });
 }
@@ -566,7 +618,17 @@ export function listAssets(db: DatabaseSync, userId?: number): Asset[] {
       method: r.method as ValuationMethod,
       annualRateBps: r.annual_rate_bps as number,
       zip: (r.zip as string | null) ?? null,
+      address: (r.address as string | null) ?? null,
     },
+    estimate:
+      r.method === "address"
+        ? {
+            lowCents: (r.estimate_low_cents as number | null) ?? null,
+            highCents: (r.estimate_high_cents as number | null) ?? null,
+            attemptAt: (r.estimate_attempt_at as number | null) ?? null,
+            error: (r.estimate_error as string | null) ?? null,
+          }
+        : null,
   }));
 }
 

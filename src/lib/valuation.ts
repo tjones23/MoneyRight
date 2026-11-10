@@ -13,11 +13,13 @@ import { daysBetween, type DateKey } from "./local-date";
  *                 car's usual curve
  *   home_index    moves with its ZIP code's home values (Zillow's ZHVI):
  *                 the entered value × index now ÷ index when it was true
+ *   address       a home valued from its address by RentCast, fetched
+ *                 again monthly (home-estimates.ts); held in between
  *
  * Pure: takes the date to value at, and the index, rather than reading them.
  */
 
-export type ValuationMethod = "fixed" | "depreciation" | "home_index";
+export type ValuationMethod = "fixed" | "depreciation" | "home_index" | "address";
 
 export interface AssetValuation {
   valueCents: number;
@@ -26,8 +28,10 @@ export interface AssetValuation {
   method: ValuationMethod;
   /** Depreciation per year, e.g. 15% → 1500. Unused by the other methods. */
   annualRateBps: number;
-  /** Five digits, for home_index. */
+  /** Five digits: for home_index, and the matched ZIP for address. */
   zip: string | null;
+  /** For address: what was entered, e.g. "12 Elm St, Boston, MA 02134". */
+  address?: string | null;
 }
 
 /** One month of an index: "YYYY-MM" and the level that month. */

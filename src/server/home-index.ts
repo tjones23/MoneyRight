@@ -123,7 +123,7 @@ export async function* fetchLines(url: string): AsyncGenerator<string> {
 /** ZIP codes of homes valued by the index, across everyone. */
 export function wantedZips(db: DatabaseSync): Set<string> {
   const rows = db
-    .prepare("SELECT DISTINCT zip FROM asset_valuations WHERE method = 'home_index' AND zip IS NOT NULL")
+    .prepare("SELECT DISTINCT zip FROM asset_valuations WHERE method IN ('home_index', 'address') AND zip IS NOT NULL")
     .all() as { zip: string }[];
   return new Set(rows.map((r) => r.zip));
 }
@@ -151,7 +151,7 @@ export function saveHomeIndex(db: DatabaseSync, found: Map<string, IndexPoint[]>
 export function pruneHomeIndex(db: DatabaseSync) {
   db.prepare(
     `DELETE FROM home_value_index WHERE zip NOT IN
-       (SELECT zip FROM asset_valuations WHERE method = 'home_index' AND zip IS NOT NULL)`,
+       (SELECT zip FROM asset_valuations WHERE method IN ('home_index', 'address') AND zip IS NOT NULL)`,
   ).run();
 }
 

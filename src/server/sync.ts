@@ -15,6 +15,8 @@ import {
 import { ProviderError } from "./providers/http";
 import { plaidBalanceCents, toLinkedAccount as plaidAccount, type PlaidClient } from "./providers/plaid";
 import { applyTransactions } from "./transactions";
+import { refreshHomeEstimates } from "./home-estimates";
+import type { RentcastClient } from "./providers/rentcast";
 import { homeIndex, homeIndexDue, refreshHomeIndex, type LineSource } from "./home-index";
 import { projectLoan } from "@/lib/amortization";
 import { estimateAsset, type IndexPoint } from "@/lib/valuation";
@@ -29,6 +31,8 @@ import { dateKey } from "@/lib/local-date";
 
 export interface Providers {
   plaid: PlaidClient | null;
+  /** Home values by address; null (or absent) until RENTCAST_API_KEY is set. */
+  rentcast?: RentcastClient | null;
 }
 
 const HOUR = 60 * 60_000;
@@ -154,6 +158,14 @@ export async function syncDue(ctx: Ctx, providers: Providers, now: number) {
     await syncConnection(ctx, providers, connection, Date.now());
   }
   syncScheduledLoans(ctx, now);
+  if (providers.rentcast) {
+    try {
+      const count = await refreshHomeEstimates(ctx.db, providers.rentcast, now);
+      if (count) console.log(`[moneyright] re-estimated ${count} home${count === 1 ? "" : "s"} from their address`);
+    } catch (error) {
+      console.warn("[moneyright] home estimates failed:", error instanceof Error ? error.name : "unexpected");
+    }
+  }
   syncAssets(ctx, now);
   await syncHomeIndex(ctx, now);
   return due.length;

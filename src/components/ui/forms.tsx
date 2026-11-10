@@ -1,7 +1,23 @@
 "use client";
 
+import { useState } from "react";
 import { useFormStatus } from "react-dom";
 import type { InputHTMLAttributes, ReactNode } from "react";
+
+/**
+ * A <details> that remembers being opened. A server-rendered `open={…}`
+ * would snap shut on the refresh after a form inside it succeeds (say, the
+ * first item added), hiding the very message saying it worked.
+ */
+export function Disclosure({ summary, initiallyOpen, children }: { summary: ReactNode; initiallyOpen: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(initiallyOpen);
+  return (
+    <details open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary className="cursor-pointer text-sm font-medium">{summary}</summary>
+      {children}
+    </details>
+  );
+}
 
 /** Form building blocks shared by the sign-in and settings pages. */
 

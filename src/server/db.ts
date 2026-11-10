@@ -236,6 +236,29 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX goals_user ON goals(user_id);
   `,
+  // 7: a home valued from its address (RentCast's estimate). SQLite can't
+  // change a CHECK in place, so the table is rebuilt with the new method.
+  `
+  CREATE TABLE asset_valuations_new (
+    account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    value_cents INTEGER NOT NULL,
+    as_of TEXT NOT NULL,
+    method TEXT NOT NULL CHECK (method IN ('fixed', 'depreciation', 'home_index', 'address')),
+    annual_rate_bps INTEGER NOT NULL DEFAULT 0,
+    zip TEXT,
+    updated_at INTEGER NOT NULL,
+    -- For method address: what was entered, and the last estimate's range and outcome.
+    address TEXT,
+    estimate_low_cents INTEGER,
+    estimate_high_cents INTEGER,
+    estimate_attempt_at INTEGER,
+    estimate_error TEXT
+  );
+  INSERT INTO asset_valuations_new (account_id, value_cents, as_of, method, annual_rate_bps, zip, updated_at)
+    SELECT account_id, value_cents, as_of, method, annual_rate_bps, zip, updated_at FROM asset_valuations;
+  DROP TABLE asset_valuations;
+  ALTER TABLE asset_valuations_new RENAME TO asset_valuations;
+  `,
 ];
 
 export function openDatabase(path: string): DatabaseSync {
