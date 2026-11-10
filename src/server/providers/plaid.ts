@@ -51,6 +51,30 @@ export interface PlaidAccount {
   };
 }
 
+export interface PlaidTransaction {
+  transaction_id: string;
+  account_id: string;
+  /** Positive is money out of the account; negative, money in. */
+  amount: number;
+  iso_currency_code: string | null;
+  date: string;
+  name: string;
+  merchant_name?: string | null;
+  pending: boolean;
+  personal_finance_category?: { primary?: string | null; detailed?: string | null } | null;
+}
+
+export interface TransactionsPage {
+  added: PlaidTransaction[];
+  modified: PlaidTransaction[];
+  /** Transaction ids. */
+  removed: string[];
+  nextCursor: string;
+}
+
+/** 500 a page: 25,000 changes in one go is past two years of anyone's spending. */
+const MAX_SYNC_PAGES = 50;
+
 export class PlaidClient {
   constructor(
     private readonly config: PlaidConfig,
@@ -86,7 +110,12 @@ export class PlaidClient {
       user: { client_user_id: `moneyright-user-${opts.userId}` },
     };
     if (opts.accessToken) body.access_token = opts.accessToken;
-    else body.products = PRODUCTS[opts.purpose ?? "investments"];
+    else {
+      const products = PRODUCTS[opts.purpose ?? "investments"];
+      body.products = products;
+      // The most history Plaid gives, and only settable now: it's fixed once the Item has Transactions.
+      if (products.includes("transactions")) body.transactions = { days_requested: 730 };
+    }
     const res = await this.post<{ link_token: string }>("/link/token/create", body);
     return res.link_token;
   }
@@ -104,6 +133,50 @@ export class PlaidClient {
       { access_token: accessToken },
     );
     return { accounts: res.accounts, institutionName: res.item?.institution_name ?? null };
+  }
+
+  /** The products the Item has. Free; says whether it already has Transactions. */
+  async getItemProducts(accessToken: string): Promise<string[]> {
+    const res = await this.post<{ item: { products?: string[]; billed_products?: string[] } }>("/item/get", {
+      access_token: accessToken,
+    });
+    return [...new Set([...(res.item?.products ?? []), ...(res.item?.billed_products ?? [])])].sort();
+  }
+
+  /**
+   * Every transaction change since `cursor` (null: the whole history), paged
+   * to the end. If the data changes mid-way Plaid says so, and the whole loop
+   * starts again from the first cursor, as its docs require.
+   *
+   * Only for an Item that already has Transactions: on any other, the first
+   * call adds the product, and its billing.
+   */
+  async syncTransactions(accessToken: string, cursor: string | null): Promise<TransactionsPage> {
+    for (let attempt = 0; ; attempt++) {
+      const page: TransactionsPage = { added: [], modified: [], removed: [], nextCursor: cursor ?? "" };
+      try {
+        for (let pages = 0; ; pages++) {
+          if (pages >= MAX_SYNC_PAGES) throw new ProviderError("plaid", 0, "too_many_pages", false, true);
+          const body: Record<string, unknown> = { access_token: accessToken, count: 500 };
+          if (page.nextCursor) body.cursor = page.nextCursor;
+          const res = await this.post<{
+            added: PlaidTransaction[];
+            modified: PlaidTransaction[];
+            removed: { transaction_id: string }[];
+            next_cursor: string;
+            has_more: boolean;
+          }>("/transactions/sync", body);
+          page.added.push(...res.added);
+          page.modified.push(...res.modified);
+          page.removed.push(...res.removed.map((r) => r.transaction_id));
+          page.nextCursor = res.next_cursor;
+          if (!res.has_more) return page;
+        }
+      } catch (error) {
+        const restart = error instanceof ProviderError && error.code === "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION";
+        if (!restart || attempt >= 2) throw error;
+      }
+    }
   }
 
   /** Ends the Item. On the Trial plan this does not give back its slot. */

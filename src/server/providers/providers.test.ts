@@ -27,6 +27,16 @@ describe("Plaid", () => {
     expect(second.access_token).toBe("access-1");
   });
 
+  it("asks a bank link for two years of transactions, and only a bank link", async () => {
+    const { seen, transport } = recording({ status: 200, body: JSON.stringify({ link_token: "link-1" }) });
+    const plaid = new PlaidClient(config, transport);
+    await plaid.createLinkToken({ userId: 3, purpose: "bank" });
+    await plaid.createLinkToken({ userId: 3, purpose: "investments" });
+    const [bank, investments] = seen.map((r) => JSON.parse(r.body!));
+    expect(bank).toMatchObject({ products: ["transactions"], transactions: { days_requested: 730 } });
+    expect(investments.transactions).toBeUndefined();
+  });
+
   it("uses the free cached /accounts/get, never the billed balance endpoint", async () => {
     const { seen, transport } = recording({ status: 200, body: JSON.stringify({ accounts: [], item: {} }) });
     await new PlaidClient(config, transport).getAccounts("access-1");

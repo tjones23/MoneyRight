@@ -52,6 +52,25 @@ change, an extra payment) re-anchors the schedule from that date.
    of kind property / vehicle / other: a value as of a date, then held,
    depreciated yearly, or (homes) moved by the ZIP code's Zillow Home Value
    Index, downloaded weekly as Zillow's whole free national file.
+6. **Equity, spending, forecast — done.**
+   - *Equity:* loans (mortgage, auto, student — not cards) set against an
+     asset; its value less them, and the share borrowed. Net worth is
+     unchanged: both sides were already counted.
+   - *Spending:* transactions through Plaid's `/transactions/sync`, with a
+     cursor per connection, only for Items that already have Transactions —
+     `/item/get` is checked first, because syncing any other Item adds the
+     product and its billing. New bank links ask for 730 days of history
+     (fixed at link time). Monthly in / out / saved, categories (Plaid's
+     personal finance category), recurring charges found from rhythm and
+     amount. Transfers, loan disbursements and card payments aren't
+     counted; refunds net against their category.
+   - *Forecast and goals:* month by month to 30 years. Loan schedules
+     amortize, assets follow their estimate (a home its ZIP's last five
+     years, capped ±8%/yr), linked loans pay down at their last 90 days'
+     pace, investments grow at an assumed return (5% default), and monthly
+     savings — the last six whole months' average, or a set amount — add
+     up. Goals for net worth or any one account (a debt counts down), with
+     an optional date and an on-track check.
 
 ## Asset valuation sources (reviewed November 2026)
 

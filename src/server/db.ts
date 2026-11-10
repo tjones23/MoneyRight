@@ -183,6 +183,59 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (zip, month)
   );
   `,
+  // 6: equity (loans against assets), transactions, the forecast and goals.
+  `
+  -- Each loan secures at most one asset; an asset may have several (a mortgage and a HELOC).
+  CREATE TABLE asset_loans (
+    loan_account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    asset_account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE
+  );
+  CREATE INDEX asset_loans_asset ON asset_loans(asset_account_id);
+
+  -- The Item's products, from /item/get, comma-separated: transactions are only
+  -- fetched for an Item that already has them, since asking adds (and bills) the product.
+  ALTER TABLE connections ADD COLUMN products TEXT;
+  ALTER TABLE connections ADD COLUMN transactions_cursor TEXT;
+  ALTER TABLE connections ADD COLUMN transactions_synced_at INTEGER;
+
+  CREATE TABLE transactions (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    -- Plaid's transaction id.
+    external_id TEXT NOT NULL UNIQUE,
+    day TEXT NOT NULL,
+    -- Plaid's sign: positive is money out of the account, negative money in.
+    amount_cents INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    merchant TEXT,
+    -- Plaid's personal finance category, primary and detailed.
+    category TEXT,
+    category_detailed TEXT,
+    pending INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX transactions_account_day ON transactions(account_id, day);
+
+  CREATE TABLE forecast_settings (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    -- Yearly growth assumed for investments, in hundredths of a percent.
+    investment_return_bps INTEGER NOT NULL,
+    -- Monthly savings added to cash; null means the recent average from transactions.
+    monthly_savings_cents INTEGER,
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE goals (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- Null for a net-worth goal; otherwise one account's balance (or, for a debt, what's owed).
+    account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    target_cents INTEGER NOT NULL,
+    target_date TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX goals_user ON goals(user_id);
+  `,
 ];
 
 export function openDatabase(path: string): DatabaseSync {

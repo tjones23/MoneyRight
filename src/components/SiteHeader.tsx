@@ -9,9 +9,17 @@ export function SiteHeader({ user }: { user: User }) {
         <Link href="/" className="font-semibold tracking-tight text-accent">
           MoneyRight
         </Link>
-        <nav className="flex flex-1 items-center gap-4 text-sm text-muted">
+        {/* Five links outgrow a phone's width: they scroll sideways there rather than wrap. */}
+        <nav className="flex min-w-0 flex-1 items-center gap-4 overflow-x-auto whitespace-nowrap text-sm text-muted">
+
           <Link href="/" className="hover:text-text">
             Overview
+          </Link>
+          <Link href="/spending" className="hover:text-text">
+            Spending
+          </Link>
+          <Link href="/forecast" className="hover:text-text">
+            Forecast
           </Link>
           <Link href="/accounts" className="hover:text-text">
             Accounts
