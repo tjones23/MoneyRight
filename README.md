@@ -85,6 +85,19 @@ lookup) — no free service prices a particular house or car. After that:
   again.
 - anything else holds its value until you update it.
 
+On an asset, **Loans against it** sets its mortgage or car loan against it,
+and the Accounts page and overview show its equity.
+
+**Spending** comes from transactions on bank and card links (Plaid's
+“bank” link, which already asks for Transactions); existing bank links
+start bringing them in on their next refresh, and new ones ask for two
+years of history. Investment- and loan-only links are never asked for
+transactions: on those, Plaid would add the product and bill for it.
+
+**Forecast** projects net worth from everything above plus your monthly
+savings (the last six months' average from transactions, unless you set
+one) and an assumed investment return; goals are checked against it.
+
 Balances refresh by themselves about once a day (hourly retries after a
 failure), from a timer inside the server — nothing outside the tailnet can
 call in, so there are no webhooks. Plaid's balances are its free cached
@@ -207,6 +220,8 @@ src/lib/               pure, framework-free, unit-tested
   money.ts             integer cents in, dollars out
   amortization.ts      federal-loan projection (simple daily interest)
   valuation.ts         asset estimates: fixed, yearly depreciation, home index
+  cash-flow.ts         monthly in/out by category, savings average, recurring charges
+  forecast.ts          net worth projected month by month; goal progress
   account-kinds.ts     Plaid types → cash, investment, property, credit, mortgage…
   net-worth.ts         assets − liabilities
   history.ts           daily series from sparse snapshots; what changed, and why
@@ -218,6 +233,8 @@ src/server/            the database, identity and bank data
   auth.ts              the data access layer: cookies, requireUser, rate limits
   finance.ts           connections, accounts, daily snapshots, loan schedules, assets
   home-index.ts        Zillow's ZIP-code home value index: download, parse, keep what's used
+  transactions.ts      Plaid transaction sync results, stored and read per user
+  planning.ts          forecast assumptions, goals, and the forecast's inputs
   sync.ts              one refresh pass: fetch, snapshot, record errors by code
   scheduler.ts         the hourly timer that runs it, and the nightly backup
   backup.ts            backups: consistent copy, encrypt, prune

@@ -4,12 +4,15 @@ import { PageBody, SiteHeader } from "@/components/SiteHeader";
 import { PlaidLinkForm, PlaidReconnectButton, RefreshButton } from "@/components/LinkButtons";
 import { AddLoanForm, EditLoanForm, type LoanDefaults } from "@/components/LoanForms";
 import { AddAssetForm, EditAssetForm, type AssetDefaults } from "@/components/AssetForms";
+import { AssetLoansForm } from "@/components/PlanForms";
 import { requireUser } from "@/server/auth";
 import { appContext } from "@/server/context";
 import { homeIndex, homeIndexStatus } from "@/server/home-index";
 import {
+  assetLoans,
   listAccounts,
   listAssets,
+  securableLoans,
   listConnections,
   listScheduledLoans,
   PLAID_TRIAL_ITEMS,
@@ -100,6 +103,11 @@ export default async function AccountsPage() {
     if (a.valuation.method === "home_index" && zip && !indexes.has(zip)) indexes.set(zip, homeIndex(ctx.db, zip));
   }
   const indexStatus = assets.some((a) => a.valuation.method === "home_index") ? homeIndexStatus(ctx.db) : null;
+  const loansFor = assetLoans(ctx.db, user.id);
+  const securable = securableLoans(ctx.db, user.id);
+  const securedBy = new Map<number, number>();
+  for (const [assetId, loanIds] of loansFor) for (const id of loanIds) securedBy.set(id, assetId);
+  const assetName = new Map(assets.map((a) => [a.accountId, a.name]));
 
   return (
     <>
@@ -270,6 +278,9 @@ export default async function AccountsPage() {
               const index = (v.zip && indexes.get(v.zip)) || [];
               const estimate = estimateAsset(v, today, index);
               const account = accounts.find((a) => a.id === asset.accountId);
+              const mine = new Set(loansFor.get(asset.accountId) ?? []);
+              const owedAgainst = securable.filter((l) => mine.has(l.id));
+              const owed = owedAgainst.reduce((n, l) => n + (l.balanceCents ?? 0), 0);
               const stale = v.method !== "home_index" && daysBetween(v.asOf, today) > RECHECK_AFTER_DAYS;
               const defaults: AssetDefaults = {
                 accountId: asset.accountId,
@@ -295,6 +306,17 @@ export default async function AccountsPage() {
                         {valuationText(v, index, today)}
                         {stale && " · worth looking up again"}
                       </p>
+                      {owedAgainst.length > 0 && (
+                        <p className="mt-1 text-xs">
+                          <span className="text-muted">
+                            Less {owedAgainst.map((l) => l.name).join(" and ")} ({formatCents(owed)}):
+                          </span>{" "}
+                          <span className="font-medium">{formatCents(estimate.valueCents - owed)} equity</span>
+                          {estimate.valueCents > 0 && (
+                            <span className="text-muted"> · {Math.round((owed / estimate.valueCents) * 100)}% borrowed</span>
+                          )}
+                        </p>
+                      )}
                     </div>
                     <span className="tabular-nums">{formatCents(estimate.valueCents)}</span>
                     {account && (
@@ -312,6 +334,22 @@ export default async function AccountsPage() {
                     <div className="mt-3 space-y-3">
                       <p className="text-xs text-muted">Pre-filled with today&apos;s estimate — change what you know better.</p>
                       <EditAssetForm defaults={defaults} />
+                      {securable.length > 0 && (
+                        <div className="border-t border-line-soft pt-3">
+                          <AssetLoansForm
+                            accountId={asset.accountId}
+                            loans={securable.map((l) => {
+                              const other = securedBy.get(l.id);
+                              return {
+                                id: l.id,
+                                label: `${l.name} · ${l.institutionName}${l.balanceCents === null ? "" : ` · ${formatCents(l.balanceCents)}`}`,
+                                checked: mine.has(l.id),
+                                elsewhere: other !== undefined && other !== asset.accountId ? (assetName.get(other) ?? null) : null,
+                              };
+                            })}
+                          />
+                        </div>
+                      )}
                       <form action={deleteAssetAction}>
                         <input type="hidden" name="accountId" value={asset.accountId} />
                         <button type="submit" className="text-xs text-danger underline">

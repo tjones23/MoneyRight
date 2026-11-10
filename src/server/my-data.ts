@@ -1,7 +1,9 @@
 import type { Ctx } from "./accounts";
 import { AccountError, getUser, listUsers, logEvent, recentEvents } from "./accounts";
 import { transaction } from "./db";
-import { listAccounts, listAssets, listConnections, listScheduledLoans, snapshots } from "./finance";
+import { assetLoans, listAccounts, listAssets, listConnections, listScheduledLoans, snapshots } from "./finance";
+import { forecastSettings, listGoals } from "./planning";
+import { listTransactions } from "./transactions";
 import { pruneHomeIndex } from "./home-index";
 import { listPasskeys } from "./passkeys";
 import { revokeConnection, type Providers } from "./sync";
@@ -64,6 +66,28 @@ export function exportUserData(ctx: Ctx, userId: number) {
       depreciationPercentPerYear: a.valuation.method === "depreciation" ? a.valuation.annualRateBps / 100 : null,
       zip: a.valuation.zip,
     })),
+    loansAgainstAssets: [...assetLoans(ctx.db, userId)].map(([assetAccountId, loanAccountIds]) => ({ assetAccountId, loanAccountIds })),
+    transactions: listTransactions(ctx.db, userId, { includeUncounted: true }).map((t) => ({
+      accountId: t.accountId,
+      day: t.day,
+      // Statement sign: money in is positive.
+      amount: -t.amountCents / 100,
+      name: t.name,
+      merchant: t.merchant,
+      category: t.category,
+      categoryDetailed: t.categoryDetailed,
+      pending: t.pending,
+    })),
+    forecastAssumptions: (({ investmentReturnBps, monthlySavingsCents }) => ({
+      investmentReturnPercent: investmentReturnBps / 100,
+      monthlySavings: monthlySavingsCents === null ? null : monthlySavingsCents / 100,
+    }))(forecastSettings(ctx.db, userId)),
+    goals: listGoals(ctx.db, userId).map((g) => ({
+      name: g.name,
+      accountId: g.accountId,
+      target: g.targetCents / 100,
+      targetDate: g.targetDate,
+    })),
     passkeys: listPasskeys(ctx.db, userId).map((p) => ({ name: p.name, host: p.rpId, addedAt: new Date(p.createdAt).toISOString() })),
     securityEvents: recentEvents(ctx.db, userId, 1000).map((e) => ({ at: new Date(e.at).toISOString(), event: e.event, detail: e.detail })),
   };
@@ -74,7 +98,10 @@ export async function deleteFinancialData(ctx: Ctx, providers: Providers, userId
   for (const connection of listConnections(ctx.db, userId)) await revokeConnection(ctx, providers, connection);
   transaction(ctx.db, () => {
     ctx.db.prepare("DELETE FROM connections WHERE user_id = ?").run(userId);
+    // Transactions, equity links and account goals go with the accounts; net-worth goals and assumptions too.
     ctx.db.prepare("DELETE FROM accounts WHERE user_id = ?").run(userId);
+    ctx.db.prepare("DELETE FROM goals WHERE user_id = ?").run(userId);
+    ctx.db.prepare("DELETE FROM forecast_settings WHERE user_id = ?").run(userId);
     pruneHomeIndex(ctx.db);
     logEvent(ctx.db, userId, "financial-data-deleted", now);
   });

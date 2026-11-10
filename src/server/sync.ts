@@ -7,11 +7,14 @@ import {
   recordAttempt,
   recordBalance,
   saveLinkedAccounts,
+  setConnectionProducts,
+  transactionsCursor,
   type Connection,
   type ConnectionStatus,
 } from "./finance";
 import { ProviderError } from "./providers/http";
 import { plaidBalanceCents, toLinkedAccount as plaidAccount, type PlaidClient } from "./providers/plaid";
+import { applyTransactions } from "./transactions";
 import { homeIndex, homeIndexDue, refreshHomeIndex, type LineSource } from "./home-index";
 import { projectLoan } from "@/lib/amortization";
 import { estimateAsset, type IndexPoint } from "@/lib/valuation";
@@ -67,7 +70,34 @@ async function syncPlaid(ctx: Ctx, plaid: PlaidClient, connection: Connection, t
     const { balance, available } = plaidBalanceCents(account);
     if (balance !== null) recordBalance(ctx.db, ids.get(account.account_id)!, day, balance, available, now);
   }
+  await syncTransactions(ctx, plaid, connection, token, ids, now);
   return accounts.length;
+}
+
+/**
+ * New, changed and removed transactions since the last sync — only for an
+ * Item that already has Transactions (asking any other would add the product
+ * and its billing). A failure here is logged and retried next refresh; the
+ * balances above still count.
+ */
+async function syncTransactions(
+  ctx: Ctx,
+  plaid: PlaidClient,
+  connection: Connection,
+  token: string,
+  ids: Map<string, number>,
+  now: number,
+) {
+  try {
+    const products = await plaid.getItemProducts(token);
+    setConnectionProducts(ctx.db, connection.id, products);
+    if (!products.includes("transactions")) return;
+    const page = await plaid.syncTransactions(token, transactionsCursor(ctx.db, connection.id));
+    applyTransactions(ctx.db, connection.id, ids, page, now);
+  } catch (error) {
+    const code = error instanceof ProviderError ? error.code : "unexpected";
+    console.warn(`[moneyright] transactions for connection #${connection.id} failed: ${code}`);
+  }
 }
 
 /** Today's projected balance for every scheduled loan (or one user's). */

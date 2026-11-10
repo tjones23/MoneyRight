@@ -4,7 +4,7 @@ import { requireUser } from "@/server/auth";
 import { appContext } from "@/server/context";
 import { HistoryTable, RangeFilter } from "@/components/History";
 import { TrendChart } from "@/components/TrendChart";
-import { firstBalanceDay, listAccounts, listConnections, snapshots } from "@/server/finance";
+import { assetLoans, firstBalanceDay, listAccounts, listConnections, snapshots } from "@/server/finance";
 import { isLiability, KIND_LABEL } from "@/lib/account-kinds";
 import { changes, netWorthSeries, parseRange, rangeStart } from "@/lib/history";
 import { daysBetween, todayKey } from "@/lib/local-date";
@@ -60,6 +60,13 @@ export default async function OverviewPage({ searchParams }: PageProps<"/">) {
   const moved = daysBetween(from, today) > 0 ? changes(everyAccount, history, from, today) : null;
   const names = new Map(everyAccount.map((a) => [a.id, a]));
   const movers = moved?.accounts.filter((c) => c.effectCents !== 0).slice(0, 8) ?? [];
+  // An asset's value less the loans set against it.
+  const equity = new Map<number, number>();
+  for (const [assetId, loanIds] of assetLoans(db, user.id)) {
+    const value = names.get(assetId)?.balanceCents;
+    if (value === null || value === undefined) continue;
+    equity.set(assetId, loanIds.reduce((n, id) => n - (names.get(id)?.balanceCents ?? 0), value));
+  }
 
   return (
     <>
@@ -171,6 +178,7 @@ export default async function OverviewPage({ searchParams }: PageProps<"/">) {
                           {a.institutionName}
                           {a.source === "schedule" && " · projected"}
                           {a.source === "estimate" && " · estimated"}
+                          {equity.has(a.id) && ` · ${formatCents(equity.get(a.id)!, { whole: true })} equity`}
                           {!a.includeInNetWorth && " · not counted"}
                           {note && ` · ${note}`}
                         </p>

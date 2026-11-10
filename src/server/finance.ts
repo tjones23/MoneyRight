@@ -3,7 +3,7 @@ import { transaction } from "./db";
 import { pruneHomeIndex } from "./home-index";
 import { AccountError, type Ctx } from "./accounts";
 import { open, seal } from "@/lib/sealed";
-import type { AccountKind } from "@/lib/account-kinds";
+import { isLiability, type AccountKind } from "@/lib/account-kinds";
 import type { LoanSchedule } from "@/lib/amortization";
 import type { AssetValuation, ValuationMethod } from "@/lib/valuation";
 import type { DateKey } from "@/lib/local-date";
@@ -29,6 +29,9 @@ export interface Connection {
   lastSyncedAt: number | null;
   lastAttemptAt: number | null;
   createdAt: number;
+  /** The Item's products, once a refresh has asked; null before that. */
+  products: string[] | null;
+  transactionsSyncedAt: number | null;
 }
 
 interface ConnectionRow {
@@ -43,6 +46,8 @@ interface ConnectionRow {
   last_synced_at: number | null;
   last_attempt_at: number | null;
   created_at: number;
+  products: string | null;
+  transactions_synced_at: number | null;
 }
 
 function toConnection(row: ConnectionRow): Connection {
@@ -57,6 +62,8 @@ function toConnection(row: ConnectionRow): Connection {
     lastSyncedAt: row.last_synced_at,
     lastAttemptAt: row.last_attempt_at,
     createdAt: row.created_at,
+    products: row.products === null || row.products === undefined ? null : row.products.split(",").filter(Boolean),
+    transactionsSyncedAt: row.transactions_synced_at ?? null,
   };
 }
 
@@ -157,6 +164,18 @@ export function recordAttempt(
        last_synced_at = CASE WHEN ? = 'ok' THEN ? ELSE last_synced_at END
      WHERE id = ?`,
   ).run(outcome.status, outcome.code ?? null, now, outcome.status, now, id);
+}
+
+export function setConnectionProducts(db: DatabaseSync, id: number, products: string[]) {
+  db.prepare("UPDATE connections SET products = ? WHERE id = ?").run(products.join(","), id);
+}
+
+/** The cursor Plaid's transaction sync resumes from; null before the first sync. */
+export function transactionsCursor(db: DatabaseSync, id: number): string | null {
+  const row = db.prepare("SELECT transactions_cursor FROM connections WHERE id = ?").get(id) as
+    | { transactions_cursor: string | null }
+    | undefined;
+  return row?.transactions_cursor || null;
 }
 
 export function deleteConnection(db: DatabaseSync, userId: number, id: number) {
@@ -556,4 +575,48 @@ export function deleteAsset(db: DatabaseSync, userId: number, accountId: number)
     "DELETE FROM accounts WHERE id = ? AND user_id = ? AND id IN (SELECT account_id FROM asset_valuations)",
   ).run(accountId, userId);
   pruneHomeIndex(db);
+}
+
+// ---------------------------------------------------------------------------
+// Equity: the loans secured by an asset (a home's mortgage, a car's loan)
+// ---------------------------------------------------------------------------
+
+/** Which of the user's accounts can be set against an asset: anything owed but a card. */
+export function securableLoans(db: DatabaseSync, userId: number): AccountView[] {
+  return listAccounts(db, userId).filter((a) => isLiability(a.kind) && a.kind !== "credit" && !a.gone);
+}
+
+/** Loan account ids by the asset they're set against. */
+export function assetLoans(db: DatabaseSync, userId: number): Map<number, number[]> {
+  const rows = db
+    .prepare(
+      `SELECT l.asset_account_id, l.loan_account_id FROM asset_loans l
+       JOIN accounts a ON a.id = l.asset_account_id
+       WHERE a.user_id = ? ORDER BY l.loan_account_id`,
+    )
+    .all(userId) as { asset_account_id: number; loan_account_id: number }[];
+  const byAsset = new Map<number, number[]>();
+  for (const r of rows) byAsset.set(r.asset_account_id, [...(byAsset.get(r.asset_account_id) ?? []), r.loan_account_id]);
+  return byAsset;
+}
+
+/**
+ * Sets which loans an asset secures, replacing what was there. A loan moves
+ * here from any other asset; ids that aren't the user's own debts are refused.
+ */
+export function setAssetLoans(db: DatabaseSync, userId: number, assetAccountId: number, loanAccountIds: number[]) {
+  transaction(db, () => {
+    const asset = db
+      .prepare("SELECT 1 FROM accounts a JOIN asset_valuations v ON v.account_id = a.id WHERE a.id = ? AND a.user_id = ?")
+      .get(assetAccountId, userId);
+    if (!asset) throw new AccountError("That asset doesn't exist.");
+    const allowed = new Set(securableLoans(db, userId).map((a) => a.id));
+    if (loanAccountIds.some((id) => !allowed.has(id))) throw new AccountError("Only your own loans can be set against an asset.");
+    db.prepare("DELETE FROM asset_loans WHERE asset_account_id = ?").run(assetAccountId);
+    const insert = db.prepare(
+      `INSERT INTO asset_loans (loan_account_id, asset_account_id) VALUES (?, ?)
+       ON CONFLICT (loan_account_id) DO UPDATE SET asset_account_id = excluded.asset_account_id`,
+    );
+    for (const id of new Set(loanAccountIds)) insert.run(id, assetAccountId);
+  });
 }
