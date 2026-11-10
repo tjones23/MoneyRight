@@ -65,6 +65,7 @@ export function exportUserData(ctx: Ctx, userId: number) {
       method: a.valuation.method,
       depreciationPercentPerYear: a.valuation.method === "depreciation" ? a.valuation.annualRateBps / 100 : null,
       zip: a.valuation.zip,
+      address: a.valuation.address ?? null,
     })),
     loansAgainstAssets: [...assetLoans(ctx.db, userId)].map(([assetAccountId, loanAccountIds]) => ({ assetAccountId, loanAccountIds })),
     transactions: listTransactions(ctx.db, userId, { includeUncounted: true }).map((t) => ({

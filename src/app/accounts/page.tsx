@@ -5,6 +5,9 @@ import { PlaidLinkForm, PlaidReconnectButton, RefreshButton } from "@/components
 import { AddLoanForm, EditLoanForm, type LoanDefaults } from "@/components/LoanForms";
 import { AddAssetForm, EditAssetForm, type AssetDefaults } from "@/components/AssetForms";
 import { AssetLoansForm } from "@/components/PlanForms";
+import { Disclosure } from "@/components/ui/forms";
+import { rentcastRequestsThisMonth, RENTCAST_MONTHLY_CAP } from "@/server/home-estimates";
+import { rentcastConfig } from "@/server/providers/rentcast";
 import { requireUser } from "@/server/auth";
 import { appContext } from "@/server/context";
 import { homeIndex, homeIndexStatus } from "@/server/home-index";
@@ -18,6 +21,7 @@ import {
   PLAID_TRIAL_ITEMS,
   plaidItemsUsed,
   type AccountView,
+  type AddressEstimate,
   type Connection,
 } from "@/server/finance";
 import { plaidConfig } from "@/server/providers/config";
@@ -69,8 +73,15 @@ function monthName(month: string) {
 const RECHECK_AFTER_DAYS = 180;
 
 /** How an asset's estimate is moving, in a line. */
-function valuationText(v: AssetValuation, index: IndexPoint[], today: string): string {
+function valuationText(v: AssetValuation, index: IndexPoint[], today: string, estimate: AddressEstimate | null): string {
   const since = `from ${formatCents(v.valueCents, { whole: true })} on ${v.asOf}`;
+  if (v.method === "address") {
+    const range =
+      estimate?.lowCents && estimate.highCents
+        ? ` · likely ${formatCents(estimate.lowCents, { whole: true })}–${formatCents(estimate.highCents, { whole: true })}`
+        : "";
+    return `${v.address} · RentCast estimate as of ${v.asOf}${range}`;
+  }
   if (v.method === "depreciation") return `Loses ${(v.annualRateBps / 100).toFixed(1)}% a year, ${since}`;
   if (v.method === "fixed") return `Held at the value you entered on ${v.asOf}`;
   const now = indexAt(index, today);
@@ -83,6 +94,7 @@ export default async function AccountsPage() {
   const { user } = await requireUser();
   const ctx = appContext();
   const plaid = plaidConfig();
+  const addressLookup = rentcastConfig() !== null;
   const connections = listConnections(ctx.db, user.id);
   const accounts = listAccounts(ctx.db, user.id);
   const loans = listScheduledLoans(ctx.db, user.id);
@@ -239,8 +251,7 @@ export default async function AccountsPage() {
                 </div>
               );
             })}
-            <details open={loans.length === 0}>
-              <summary className="cursor-pointer text-sm font-medium">Add a loan</summary>
+            <Disclosure summary="Add a loan" initiallyOpen={loans.length === 0}>
               <p className="mt-2 text-xs text-muted">
                 One entry per loan if their rates differ — MOHELA lists each loan separately.
               </p>
@@ -258,13 +269,17 @@ export default async function AccountsPage() {
                   }}
                 />
               </div>
-            </details>
+            </Disclosure>
           </div>
         </Section>
 
         <Section
           title="Homes, vehicles and other assets"
-          subtitle="Nothing free prices a particular house or car, so enter a value once — an appraisal, a purchase price, a Kelley Blue Book or Consumer Reports lookup — and MoneyRight moves it along: a home with its ZIP code's home values, a vehicle by yearly depreciation. Update it whenever you check a fresher number."
+          subtitle={
+            addressLookup
+              ? "A home is valued from its address — RentCast's estimate from nearby sales, re-checked monthly. A vehicle starts from a value you look up (Kelley Blue Book, Edmunds or Consumer Reports) and depreciates yearly until you update it."
+              : "Enter a value once — an appraisal, a purchase price, a Kelley Blue Book or Consumer Reports lookup — and MoneyRight moves it along: a home with its ZIP code's home values, a vehicle by yearly depreciation. Update it whenever you check a fresher number."
+          }
         >
           <div className="space-y-6">
             {indexStatus?.error && (
@@ -281,7 +296,7 @@ export default async function AccountsPage() {
               const mine = new Set(loansFor.get(asset.accountId) ?? []);
               const owedAgainst = securable.filter((l) => mine.has(l.id));
               const owed = owedAgainst.reduce((n, l) => n + (l.balanceCents ?? 0), 0);
-              const stale = v.method !== "home_index" && daysBetween(v.asOf, today) > RECHECK_AFTER_DAYS;
+              const stale = v.method !== "home_index" && v.method !== "address" && daysBetween(v.asOf, today) > RECHECK_AFTER_DAYS;
               const defaults: AssetDefaults = {
                 accountId: asset.accountId,
                 name: asset.name,
@@ -291,6 +306,7 @@ export default async function AccountsPage() {
                 method: v.method,
                 rate: v.method === "depreciation" ? (v.annualRateBps / 100).toFixed(1) : (DEFAULT_VEHICLE_DEPRECIATION_BPS / 100).toFixed(1),
                 zip: v.zip ?? "",
+                address: v.address ?? "",
               };
               return (
                 <div key={asset.accountId} className="rounded-xl border border-line-soft p-4">
@@ -303,9 +319,10 @@ export default async function AccountsPage() {
                         <span className="text-sm text-muted">· {KIND_LABEL[asset.kind]}</span>
                       </p>
                       <p className="text-xs text-muted">
-                        {valuationText(v, index, today)}
+                        {valuationText(v, index, today, asset.estimate)}
                         {stale && " · worth looking up again"}
                       </p>
+                      {asset.estimate?.error && <p className="mt-1 text-xs text-danger">Last lookup: {asset.estimate.error}</p>}
                       {owedAgainst.length > 0 && (
                         <p className="mt-1 text-xs">
                           <span className="text-muted">
@@ -332,8 +349,12 @@ export default async function AccountsPage() {
                   <details className="mt-3 text-sm">
                     <summary className="cursor-pointer text-muted">Have a fresher value? Update it</summary>
                     <div className="mt-3 space-y-3">
-                      <p className="text-xs text-muted">Pre-filled with today&apos;s estimate — change what you know better.</p>
-                      <EditAssetForm defaults={defaults} />
+                      <p className="text-xs text-muted">
+                        {v.method === "address"
+                          ? "Change the address to look it up again; it's re-checked monthly on its own."
+                          : "Pre-filled with today's estimate — change what you know better."}
+                      </p>
+                      <EditAssetForm defaults={defaults} addressLookup={addressLookup} />
                       {securable.length > 0 && (
                         <div className="border-t border-line-soft pt-3">
                           <AssetLoansForm
@@ -361,30 +382,43 @@ export default async function AccountsPage() {
                 </div>
               );
             })}
-            <details open={assets.length === 0}>
-              <summary className="cursor-pointer text-sm font-medium">Add an asset</summary>
+            <Disclosure summary="Add an asset" initiallyOpen={assets.length === 0}>
               <p className="mt-2 text-xs text-muted">
-                A mortgage or car loan is linked separately; this is only what the thing itself is worth.
+                A mortgage or car loan is linked separately, then set against it for its equity; this is only what the thing
+                itself is worth.
               </p>
+              {!addressLookup && (
+                <p className="mt-2 text-xs text-muted">
+                  To value a home from just its address, set RENTCAST_API_KEY (a free RentCast key — see the README).
+                </p>
+              )}
               <div className="mt-3">
                 <AddAssetForm
+                  addressLookup={addressLookup}
                   defaults={{
                     name: "",
                     kind: "property",
                     value: "",
                     asOf: today,
-                    method: "home_index",
+                    method: addressLookup ? "address" : "home_index",
                     rate: (DEFAULT_VEHICLE_DEPRECIATION_BPS / 100).toFixed(1),
                     zip: "",
+                    address: "",
                   }}
                 />
               </div>
-            </details>
-            {indexStatus && (
+            </Disclosure>
+            {(indexStatus || assets.some((a) => a.valuation.method === "address")) && (
               <p className="text-xs text-muted">
-                Home values: Zillow Home Value Index (ZHVI), by ZIP code, from Zillow&apos;s free research data
-                {indexStatus.latestMonth && `, through ${monthName(indexStatus.latestMonth)}`}. The whole national file is
-                downloaded, so no ZIP code is ever sent anywhere.
+                {assets.some((a) => a.valuation.method === "address") &&
+                  `Values from an address: RentCast, re-checked monthly (${rentcastRequestsThisMonth(ctx.db)} of ${RENTCAST_MONTHLY_CAP} lookups used this month). `}
+                {indexStatus && (
+                  <>
+                    ZIP home values: Zillow Home Value Index (ZHVI), from Zillow&apos;s free research data
+                    {indexStatus.latestMonth && `, through ${monthName(indexStatus.latestMonth)}`}; the whole national file is
+                    downloaded, so no ZIP code is sent anywhere.
+                  </>
+                )}
               </p>
             )}
           </div>

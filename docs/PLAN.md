@@ -88,7 +88,11 @@ change, an extra payment) re-anchors the schedule from that date.
   indexes come only annually, as XLSX.
 - **Redfin Data Center** (free, by ZIP, sale prices rather than values)
   and Census ACS (annual medians, a year or more behind) were passed over.
-- Individual-home estimates (Zestimate, Redfin Estimate) have no free API.
+- Individual-home estimates: the Zestimate has no API outside Zillow's
+  partner program (MLS or brokerage credentials; the public API closed in
+  2021), nor does Redfin's. **RentCast** (added after Phase 6) gives the same
+  kind of per-address estimate on a free 50-a-month plan; it bills past 50
+  with no cap of its own, so MoneyRight caps itself at 40 a month.
 
 ## Decisions made along the way
 
