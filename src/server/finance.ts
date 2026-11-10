@@ -1,9 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import { transaction } from "./db";
+import { pruneHomeIndex } from "./home-index";
 import { AccountError, type Ctx } from "./accounts";
 import { open, seal } from "@/lib/sealed";
 import type { AccountKind } from "@/lib/account-kinds";
 import type { LoanSchedule } from "@/lib/amortization";
+import type { AssetValuation, ValuationMethod } from "@/lib/valuation";
 import type { DateKey } from "@/lib/local-date";
 
 /**
@@ -264,7 +266,8 @@ export interface AccountView {
   balanceCents: number | null;
   balanceDay: DateKey | null;
   balanceRecordedAt: number | null;
-  source: Provider | "schedule";
+  /** Linked through a provider, projected from a loan schedule, or an estimated asset value. */
+  source: Provider | "schedule" | "estimate";
   connectionStatus: ConnectionStatus | null;
 }
 
@@ -272,10 +275,11 @@ export interface AccountView {
 export function listAccounts(db: DatabaseSync, userId: number): AccountView[] {
   const rows = db
     .prepare(
-      `SELECT a.*, c.provider, c.status AS connection_status,
+      `SELECT a.*, c.provider, c.status AS connection_status, v.account_id AS valuation_id,
               s.balance_cents, s.day AS balance_day, s.recorded_at AS balance_recorded_at
        FROM accounts a
        LEFT JOIN connections c ON c.id = a.connection_id
+       LEFT JOIN asset_valuations v ON v.account_id = a.id
        LEFT JOIN balance_snapshots s ON s.account_id = a.id
          AND s.day = (SELECT MAX(day) FROM balance_snapshots WHERE account_id = a.id)
        WHERE a.user_id = ?
@@ -295,7 +299,7 @@ export function listAccounts(db: DatabaseSync, userId: number): AccountView[] {
     balanceCents: (r.balance_cents as number | null) ?? null,
     balanceDay: (r.balance_day as string | null) ?? null,
     balanceRecordedAt: (r.balance_recorded_at as number | null) ?? null,
-    source: r.connection_id === null ? "schedule" : (r.provider as Provider),
+    source: r.connection_id !== null ? (r.provider as Provider) : r.valuation_id !== null ? "estimate" : "schedule",
     connectionStatus: (r.connection_status as ConnectionStatus | null) ?? null,
   }));
 }
@@ -409,7 +413,9 @@ export function updateScheduledLoan(
 ) {
   transaction(db, () => {
     const updated = db
-      .prepare("UPDATE accounts SET name = ?, institution_name = ? WHERE id = ? AND user_id = ? AND connection_id IS NULL")
+      .prepare(
+        "UPDATE accounts SET name = ?, institution_name = ? WHERE id = ? AND user_id = ? AND id IN (SELECT account_id FROM loan_schedules)",
+      )
       .run(details.name, details.servicer, accountId, userId);
     if (updated.changes !== 1) throw new AccountError("That loan doesn't exist.");
     writeSchedule(db, accountId, details.schedule, now);
@@ -445,5 +451,109 @@ export function listScheduledLoans(db: DatabaseSync, userId?: number): Scheduled
 }
 
 export function deleteScheduledLoan(db: DatabaseSync, userId: number, accountId: number) {
-  db.prepare("DELETE FROM accounts WHERE id = ? AND user_id = ? AND connection_id IS NULL").run(accountId, userId);
+  db.prepare("DELETE FROM accounts WHERE id = ? AND user_id = ? AND id IN (SELECT account_id FROM loan_schedules)").run(
+    accountId,
+    userId,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Assets: homes, vehicles and anything else owned (nothing free links them)
+// ---------------------------------------------------------------------------
+
+export type AssetKind = "property" | "vehicle" | "other";
+
+export const ASSET_KINDS: AssetKind[] = ["property", "vehicle", "other"];
+
+export interface Asset {
+  accountId: number;
+  userId: number;
+  name: string;
+  kind: AssetKind;
+  includeInNetWorth: boolean;
+  valuation: AssetValuation;
+  updatedAt: number;
+}
+
+export interface AssetDetails {
+  name: string;
+  kind: AssetKind;
+  valuation: AssetValuation;
+}
+
+/** The line shown under the name, standing in for an institution. */
+function assetDescription(details: AssetDetails): string {
+  if (details.kind === "property") return details.valuation.zip ? `Home · ${details.valuation.zip}` : "Home";
+  return details.kind === "vehicle" ? "Vehicle" : "Asset";
+}
+
+function writeValuation(db: DatabaseSync, accountId: number, v: AssetValuation, now: number) {
+  db.prepare(
+    `INSERT INTO asset_valuations (account_id, value_cents, as_of, method, annual_rate_bps, zip, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (account_id) DO UPDATE SET
+       value_cents = excluded.value_cents, as_of = excluded.as_of, method = excluded.method,
+       annual_rate_bps = excluded.annual_rate_bps, zip = excluded.zip, updated_at = excluded.updated_at`,
+  ).run(accountId, v.valueCents, v.asOf, v.method, v.method === "depreciation" ? v.annualRateBps : 0, v.zip, now);
+}
+
+export function addAsset(db: DatabaseSync, userId: number, details: AssetDetails, now: number): number {
+  return transaction(db, () => {
+    const result = db
+      .prepare("INSERT INTO accounts (user_id, name, institution_name, kind, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(userId, details.name, assetDescription(details), details.kind, now);
+    const accountId = Number(result.lastInsertRowid);
+    writeValuation(db, accountId, details.valuation, now);
+    return accountId;
+  });
+}
+
+/** A new value as of a date (or a new way of estimating), from which the estimate resumes. */
+export function updateAsset(db: DatabaseSync, userId: number, accountId: number, details: AssetDetails, now: number) {
+  transaction(db, () => {
+    const updated = db
+      .prepare(
+        `UPDATE accounts SET name = ?, institution_name = ?, kind = ?
+         WHERE id = ? AND user_id = ? AND id IN (SELECT account_id FROM asset_valuations)`,
+      )
+      .run(details.name, assetDescription(details), details.kind, accountId, userId);
+    if (updated.changes !== 1) throw new AccountError("That asset doesn't exist.");
+    writeValuation(db, accountId, details.valuation, now);
+    // Estimates after the new value's date came from the old one; they're redone on the next refresh.
+    db.prepare("DELETE FROM balance_snapshots WHERE account_id = ? AND day >= ?").run(accountId, details.valuation.asOf);
+    pruneHomeIndex(db);
+  });
+}
+
+export function listAssets(db: DatabaseSync, userId?: number): Asset[] {
+  const rows = db
+    .prepare(
+      `SELECT a.id, a.user_id, a.name, a.kind, a.include_in_net_worth, v.*
+       FROM asset_valuations v JOIN accounts a ON a.id = v.account_id
+       ${userId === undefined ? "" : "WHERE a.user_id = ?"}
+       ORDER BY a.name, a.id`,
+    )
+    .all(...(userId === undefined ? [] : [userId])) as Record<string, unknown>[];
+  return rows.map((r) => ({
+    accountId: r.id as number,
+    userId: r.user_id as number,
+    name: r.name as string,
+    kind: r.kind as AssetKind,
+    includeInNetWorth: r.include_in_net_worth === 1,
+    updatedAt: r.updated_at as number,
+    valuation: {
+      valueCents: r.value_cents as number,
+      asOf: r.as_of as string,
+      method: r.method as ValuationMethod,
+      annualRateBps: r.annual_rate_bps as number,
+      zip: (r.zip as string | null) ?? null,
+    },
+  }));
+}
+
+export function deleteAsset(db: DatabaseSync, userId: number, accountId: number) {
+  db.prepare(
+    "DELETE FROM accounts WHERE id = ? AND user_id = ? AND id IN (SELECT account_id FROM asset_valuations)",
+  ).run(accountId, userId);
+  pruneHomeIndex(db);
 }

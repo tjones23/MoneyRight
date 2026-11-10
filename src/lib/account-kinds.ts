@@ -4,11 +4,22 @@
  * subtracted when totalled.
  */
 
-export type AccountKind = "cash" | "investment" | "credit" | "mortgage" | "student_loan" | "loan" | "other";
+export type AccountKind =
+  | "cash"
+  | "investment"
+  | "property"
+  | "vehicle"
+  | "credit"
+  | "mortgage"
+  | "student_loan"
+  | "loan"
+  | "other";
 
 export const KIND_LABEL: Record<AccountKind, string> = {
   cash: "Cash",
   investment: "Investments",
+  property: "Property",
+  vehicle: "Vehicles",
   credit: "Credit cards",
   mortgage: "Mortgage",
   student_loan: "Student loans",
@@ -17,7 +28,7 @@ export const KIND_LABEL: Record<AccountKind, string> = {
 };
 
 /** Display order on the overview: what you have, then what you owe. */
-export const KIND_ORDER: AccountKind[] = ["cash", "investment", "other", "credit", "mortgage", "student_loan", "loan"];
+export const KIND_ORDER: AccountKind[] = ["cash", "investment", "property", "vehicle", "other", "credit", "mortgage", "student_loan", "loan"];
 
 export function isLiability(kind: AccountKind): boolean {
   return kind === "credit" || kind === "mortgage" || kind === "student_loan" || kind === "loan";

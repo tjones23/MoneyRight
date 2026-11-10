@@ -2,6 +2,7 @@ import type { Ctx } from "./accounts";
 import {
   connectionToken,
   connectionsDue,
+  listAssets,
   listScheduledLoans,
   recordAttempt,
   recordBalance,
@@ -11,7 +12,9 @@ import {
 } from "./finance";
 import { ProviderError } from "./providers/http";
 import { plaidBalanceCents, toLinkedAccount as plaidAccount, type PlaidClient } from "./providers/plaid";
+import { homeIndex, homeIndexDue, refreshHomeIndex, type LineSource } from "./home-index";
 import { projectLoan } from "@/lib/amortization";
+import { estimateAsset, type IndexPoint } from "@/lib/valuation";
 import { dateKey } from "@/lib/local-date";
 
 /**
@@ -76,13 +79,53 @@ export function syncScheduledLoans(ctx: Ctx, now: number, userId?: number) {
   }
 }
 
-/** One pass of the scheduler: every connection that's due, then the loans. */
+/** Today's estimated value for every asset (or one user's). */
+export function syncAssets(ctx: Ctx, now: number, userId?: number) {
+  const day = dateKey(now);
+  const indexes = new Map<string, IndexPoint[]>();
+  for (const asset of listAssets(ctx.db, userId)) {
+    const zip = asset.valuation.method === "home_index" ? asset.valuation.zip : null;
+    if (zip && !indexes.has(zip)) indexes.set(zip, homeIndex(ctx.db, zip));
+    const estimate = estimateAsset(asset.valuation, day, zip ? indexes.get(zip) : []);
+    recordBalance(ctx.db, asset.accountId, day, estimate.valueCents, null, now);
+  }
+}
+
+/**
+ * Downloads home values if they're due, then re-estimates every asset. A
+ * failure is recorded (homeIndexStatus) and estimates carry on from the
+ * readings already kept. One download at a time, however it was started.
+ */
+let homeIndexRunning: Promise<boolean> | null = null;
+
+export function syncHomeIndex(ctx: Ctx, now: number, source?: LineSource): Promise<boolean> {
+  homeIndexRunning ??= (async () => {
+    try {
+      if (!homeIndexDue(ctx.db, now)) return false;
+      try {
+        const found = await refreshHomeIndex(ctx.db, now, source);
+        console.log(`[moneyright] home value index refreshed for ${found} ZIP code${found === 1 ? "" : "s"}`);
+      } catch (error) {
+        console.warn("[moneyright] home value index refresh failed:", error instanceof Error ? error.message : "unexpected");
+      }
+      syncAssets(ctx, now);
+      return true;
+    } finally {
+      homeIndexRunning = null;
+    }
+  })();
+  return homeIndexRunning;
+}
+
+/** One pass of the scheduler: every connection that's due, then the loans and assets. */
 export async function syncDue(ctx: Ctx, providers: Providers, now: number) {
   const due = connectionsDue(ctx.db, now - REFRESH_EVERY_MS, now - RETRY_AFTER_MS);
   for (const connection of due) {
     await syncConnection(ctx, providers, connection, Date.now());
   }
   syncScheduledLoans(ctx, now);
+  syncAssets(ctx, now);
+  await syncHomeIndex(ctx, now);
   return due.length;
 }
 

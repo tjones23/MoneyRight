@@ -2,7 +2,8 @@
 
 A private, multi-user page for balances and an estimated net worth. Hosted
 like Outside, reachable only on this Mac and the tailnet, paying for no
-services. Credit scores are out of scope; manual balance entry is out.
+services. Credit scores are out of scope; manual balance entry is out — except the
+value of things owned (a home, a car), which nothing free can provide.
 
 ## Data sources (all free)
 
@@ -46,6 +47,29 @@ change, an extra payment) re-anchors the schedule from that date.
    moneyright` for backup / restore / reset-2fa / reset-password on this
    Mac; export, remove-financial-data, delete-account and remove-person;
    passkeys as an alternative second step.
+
+5. **Assets — done.** Homes, vehicles and other things owned, as accounts
+   of kind property / vehicle / other: a value as of a date, then held,
+   depreciated yearly, or (homes) moved by the ZIP code's Zillow Home Value
+   Index, downloaded weekly as Zillow's whole free national file.
+
+## Asset valuation sources (reviewed November 2026)
+
+- **Consumer Reports — not feasible.** No public or developer API; its
+  pricing is behind a membership, and its terms forbid scraping. Same for
+  Kelley Blue Book, Edmunds and J.D. Power (NADA): their APIs are licensed
+  to dealers and lenders. Paid VIN-valuation APIs (VinAudit, CarsXE,
+  Zyla listings) offer trials, not free tiers. So a vehicle's
+  value is looked up by hand and depreciated between lookups.
+- **Zillow ZHVI by ZIP — used.** Free monthly CSV, no key, credit to
+  Zillow requested; ~26,000 ZIPs back to 2000. The best free home-price
+  signal at a useful granularity.
+- **FHFA House Price Index — fallback if Zillow goes away.** Public domain;
+  the master CSV has state and metro indexes (quarterly), and ZIP-level
+  indexes come only annually, as XLSX.
+- **Redfin Data Center** (free, by ZIP, sale prices rather than values)
+  and Census ACS (annual medians, a year or more behind) were passed over.
+- Individual-home estimates (Zestimate, Redfin Estimate) have no free API.
 
 ## Decisions made along the way
 
