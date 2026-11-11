@@ -11,12 +11,14 @@
 # each on its own Tailscale node, sharing the closed-lid sleep hold through
 # scripts/lid-hold.sh.
 #
-# What's different here is what's missing. MoneyRight holds financial data,
-# so it is only ever served to this Mac and to the tailnet:
+# What's different here is what's guarded. MoneyRight holds financial data:
 #
 #   - no "this network" mode: the server always binds 127.0.0.1, dev included;
-#   - no Funnel: nothing here turns it on, and every hosting command (and
-#     status) turns it off if it finds it on — see ts_enforce_private.
+#   - Funnel only on purpose: `run-prod.command public` turns it on together
+#     with the marker the app's network gate needs to let public requests in
+#     ($PUBLIC_MARKER). Funnel found on without that marker — turned on by
+#     hand, or by some other tool — is turned off by every hosting command
+#     (and status); see ts_enforce_private.
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_ID="moneyright"
@@ -31,6 +33,9 @@ MODE_FILE="$REPO_DIR/mode"
 DIST_DIR="$REPO_DIR/.next"
 STATE_DIR="$REPO_DIR/.moneyright"
 BUILD_BACKUP_DIR="$STATE_DIR/previous-build"
+# While this exists, the production server lets in requests from the public
+# internet (src/lib/public-access.ts). Only public_on writes it.
+PUBLIC_MARKER="$STATE_DIR/public"
 
 # How the launcher was invoked, so hints name the file actually being run.
 SELF="./$(basename "$0")"
@@ -539,13 +544,21 @@ ts_unfunnel() {
   return 0
 }
 
-# MoneyRight is never public. If Funnel is on for this port anyway — turned
-# on by hand, or by some other tool — turn it off, loudly, and keep the
-# private tailnet listener. Non-zero means it couldn't be turned off.
+# Was public access turned on on purpose, by `run-prod.command public`?
+public_marked() { [ -f "$PUBLIC_MARKER" ]; }
+
+# Public access, on purpose, right now: Funnel on and the marker present.
+public_active() { public_marked && ts_public; }
+
+# MoneyRight is public only on purpose. If Funnel is on for this port without
+# the marker — turned on by hand, or by some other tool — turn it off, loudly,
+# and keep the private tailnet listener. Non-zero means it couldn't be turned
+# off.
 ts_enforce_private() {
   ts_public || return 0
-  err "Funnel was ON for \"$TS_NODE_NAME\" — MoneyRight was reachable from the internet. Turning it off."
-  say "  ${DIM}The app refuses requests without a tailnet identity, so the sign-in page wasn't served — but nothing should turn Funnel on for this node.${RESET}"
+  public_marked && return 0
+  err "Funnel was ON for \"$TS_NODE_NAME\" without '$SELF public' — MoneyRight was reachable from the internet. Turning it off."
+  say "  ${DIM}Without the marker the app refuses requests without a tailnet identity, so the sign-in page wasn't served. Use '$SELF public' to make it public on purpose.${RESET}"
   ts_unfunnel || return 1
   if [ -z "$(ts_serve_url)" ] && is_running; then
     ts serve --bg --https="$TS_HTTPS_PORT" "$PORT" >/dev/null 2>&1
@@ -559,6 +572,7 @@ ts_enforce_private() {
 # that, so it's still avoided. Funnel is cleared first, so this never leaves
 # the port public with nothing to show for it on the tailnet.
 ts_unserve() {
+  rm -f "$PUBLIC_MARKER"
   [ -n "$(ts_serve_url)" ] || return 0
 
   ts_unfunnel
@@ -711,7 +725,13 @@ print_urls() {
 
   local ts_url
   ts_url="$(ts_serve_url)"
-  [ -n "$ts_url" ] && say "  ${BOLD}${BLUE}${ts_url}${RESET}  ${DIM}(tailnet, HTTPS)${RESET}"
+  if [ -n "$ts_url" ]; then
+    if public_active; then
+      say "  ${BOLD}${BLUE}${ts_url}${RESET}  ${DIM}(public, HTTPS)${RESET}"
+    else
+      say "  ${BOLD}${BLUE}${ts_url}${RESET}  ${DIM}(tailnet, HTTPS)${RESET}"
+    fi
+  fi
 
   awake_for "$(server_pid)" && say "  ${DIM}Sleep is held off while it's hosted.${RESET}"
   say "  ${DIM}logs: $LOG_FILE${RESET}"
@@ -878,13 +898,41 @@ check_reachability() {
   ts_url="$(ts_serve_url)"
   [ -n "$ts_url" ] || return 0
   host="${ts_url#https://}"; host="${host%%:*}"
-  say "  ${DIM}tailnet       only devices signed in to the tailnet can open $ts_url${RESET}"
+  public_active ||
+    say "  ${DIM}tailnet       only devices signed in to the tailnet can open $ts_url${RESET}"
 
   if ! command -v dig >/dev/null 2>&1; then
     warn "internet      can't check — dig isn't installed"
     return 0
   fi
-  if [ -n "$(dig +short +time=3 +tries=1 A "$host" "@$PUBLIC_RESOLVER" 2>/dev/null | grep -E '^[0-9.]+$')" ]; then
+
+  local ips
+  ips="$(dig +short +time=3 +tries=1 A "$host" "@$PUBLIC_RESOLVER" 2>/dev/null | grep -E '^[0-9.]+$')"
+
+  # Public on purpose: the right answer is the sign-in page, fetched the way
+  # a phone off the tailnet would — through public DNS to Funnel's relays.
+  if public_active; then
+    if [ -z "$ips" ]; then
+      err "internet      $host has no public DNS record — Funnel isn't live yet (or was just turned on; give it a minute)"
+      return 1
+    fi
+    local ip any_ok=""
+    for ip in $ips; do
+      if result="$(probe --resolve "$host:$TS_HTTPS_PORT:$ip" "$ts_url/login")"; then
+        ok "internet      $ts_url via $ip — $result"
+        any_ok=1
+      else
+        err "internet      $ts_url via $ip — $result"
+      fi
+    done
+    if [ -z "$any_ok" ]; then
+      say "  ${DIM}Right after a start or restart this can take a minute or two — try '$SELF status' again shortly.${RESET}"
+      return 1
+    fi
+    return 0
+  fi
+
+  if [ -n "$ips" ]; then
     err "internet      $host has a public DNS record — Funnel may be on. Run '$SELF status' again in a minute; if this stays, check the admin console."
     return 1
   fi
@@ -950,7 +998,13 @@ menu_header() {
 
   local ts_url
   ts_url="$(ts_serve_url)"
-  [ -n "$ts_url" ] && printf '    tailnet       %s\n' "$ts_url"
+  if [ -n "$ts_url" ]; then
+    if public_active; then
+      printf '    public        %s\n' "$ts_url"
+    else
+      printf '    tailnet       %s\n' "$ts_url"
+    fi
+  fi
 
   sleep_summary
   printf '\n'

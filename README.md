@@ -3,14 +3,14 @@
 Your balances and net worth in one place: banks and cards, brokerages,
 the mortgage and student loans, on one page, for you and anyone you invite.
 
-It runs on your own Mac and is reachable only from that Mac and your
-tailnet — never the public internet. It pays for nothing: bank links use
+It runs on your own Mac and is reachable from that Mac and your tailnet —
+and, only if you turn it on with `./run-prod.command public`, from the
+internet through Tailscale Funnel. It pays for nothing: bank links use
 Plaid's free Trial plan, and federal student loans, which no free
 aggregator covers, follow their amortization schedule.
 
 Hosted the same way as [Outside](https://github.com/tjones23/Outside) and
-[WhatsGood](https://github.com/tjones23/WhatsGood), minus everything that
-would make it public.
+[WhatsGood](https://github.com/tjones23/WhatsGood), minus the LAN mode.
 
 > **Status: all four phases done** — see [docs/PLAN.md](docs/PLAN.md).
 
@@ -170,11 +170,11 @@ MoneyRight; admins can remove other people under People.
 | --- | --- |
 | **Bind** | The server listens on `127.0.0.1` only — dev included. Nothing on the LAN can connect. |
 | **Tailnet** | `tailscale serve` on MoneyRight's own node proxies HTTPS to it, adding the sender's tailnet login. |
-| **No Funnel** | The launchers have no `public` command, and turn Funnel off (loudly) if they ever find it on. |
-| **Network gate** | Every request, static files included, must carry a tailnet identity or come straight from this Mac. Anything else — which is what Funnel traffic would look like — gets a 403 before any page renders (`src/lib/network-gate.ts`). `MONEYRIGHT_ALLOWED_LOGINS` narrows it to named tailnet logins. |
+| **Funnel only on purpose** | Off unless `./run-prod.command public` turns it on, which also writes `.moneyright/public`. The launchers turn Funnel off (loudly) if they find it on without that marker. |
+| **Network gate** | Every request, static files included, must carry a tailnet identity or come straight from this Mac. Anything else — which is what Funnel traffic looks like — gets a 403 before any page renders (`src/lib/network-gate.ts`), unless `.moneyright/public` exists; then requests over HTTPS without an identity are let in to the sign-in page. `MONEYRIGHT_ALLOWED_LOGINS` narrows tailnet access to named logins; it doesn't apply to the internet. |
 | **Accounts** | Password (argon2id) **and** a second step for everyone — an authenticator code (TOTP) or a passkey (WebAuthn, user verification required) — except on the dev server's own data, above. Recovery codes for a lost phone; an admin can reset someone's authenticator. Sign-up is closed: the first account needs the setup code from this Mac, everyone else an invite (one use, seven days). |
-| **Sessions** | Random 256-bit cookie, stored only as a hash. `HttpOnly`, `SameSite=Strict`, `Secure` over the tailnet. Idle timeout 3 days, hard limit 14. A session only works from the tailnet login that signed in. Changing your password signs out everything else. |
-| **Guessing** | Sign-in, code and setup attempts are rate-limited per account and per device. |
+| **Sessions** | Random 256-bit cookie, stored only as a hash. `HttpOnly`, `SameSite=Strict`, `Secure` over the tailnet. Idle timeout 3 days, hard limit 14. A session only works from the tailnet login that signed in — one signed in over Funnel only works over Funnel. Changing your password signs out everything else. |
+| **Guessing** | Sign-in, code and setup attempts are rate-limited per account and per device (per address, over Funnel). |
 | **At rest** | SQLite in `.moneyright/<env>/`, owner-only (0700/0600), gitignored. Secrets the app must read back — TOTP secrets and every bank access token — are sealed with AES-256-GCM under `master.key`, each bound to its row. Tokens never reach the browser after linking, and logs carry only error codes, never balances or names. |
 | **Headers** | CSP with a per-request script nonce; the only outside scripts and frames are Plaid's own CDN. `no-store` on every page, HSTS on the tailnet, no framing. |
 
@@ -190,8 +190,9 @@ Same launchers as Outside — double-click for a menu, or:
 ./run-prod.command rebuild   # new production build (restarts it if running)
 ./run-prod.command start     # serve the last build, this Mac only
 ./run-prod.command tailnet   # ...and to the tailnet, over HTTPS (tailnet off to undo)
-./run-prod.command stop      # stop serving and withdraw from the tailnet
-./run-prod.command status    # includes a check that it is *not* on public DNS
+./run-prod.command public    # ...and to the internet, via Funnel (public off to go back to tailnet-only)
+./run-prod.command stop      # stop serving and withdraw from the tailnet (and the internet)
+./run-prod.command status    # reachability: public DNS absent, or — when public — the sign-in page over Funnel
 ./run-prod.command setup     # once: let hosting keep a closed-lid Mac awake
 ```
 
@@ -199,8 +200,17 @@ Same launchers as Outside — double-click for a menu, or:
 | --- | --- |
 | This Mac | `http://localhost:3002` |
 | Tailnet | `https://moneyright.<tailnet>.ts.net` |
+| Internet (`public` only) | the same `https://moneyright.<tailnet>.ts.net` |
 
-There is deliberately no LAN address and no public address.
+There is deliberately no LAN address.
+
+**Public access.** `public` works like Outside's: the first time, Tailscale
+may print a link to approve Funnel for the node (open it, then run `public`
+again). While public, anyone who has the address reaches the sign-in page,
+so the account — password plus authenticator code or passkey — is the only
+thing between the internet and the data. Turn it off with `public off`
+(still on the tailnet), `tailnet off` or `stop`; a restart or rebuild keeps
+it as it was.
 
 **Its own Tailscale node.** Like Outside, MoneyRight logs in as a separate
 node (`moneyright`; override with `MONEYRIGHT_TS_HOSTNAME`) through its own

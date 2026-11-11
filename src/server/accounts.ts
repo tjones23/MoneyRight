@@ -265,6 +265,12 @@ export interface SessionMeta {
   tailnetLogin: string | null;
 }
 
+/**
+ * Stored in place of a tailnet login for a session signed in over Funnel.
+ * No real login looks like it — they all have an @.
+ */
+export const PUBLIC_SESSION = "(internet)";
+
 /** A new session; returns the cookie value. */
 export function createSession(db: DatabaseSync, userId: number, stage: SessionStage, meta: SessionMeta, now: number) {
   const token = newToken();
