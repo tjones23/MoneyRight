@@ -20,9 +20,11 @@ import {
   allowAttempt,
   clearSessionCookie,
   currentSession,
+  describeSource,
   homeFor,
   requestInfo,
   requireStage,
+  sessionBinding,
   setSessionCookie,
 } from "@/server/auth";
 import type { RequestInfo } from "@/server/auth";
@@ -127,7 +129,7 @@ async function startSession(userId: number, hasTotp: boolean, request: RequestIn
   const ctx = appContext();
   const now = Date.now();
   const stage = !ctx.secondFactorRequired ? "full" : hasTotp ? "password" : "enroll";
-  const token = createSession(ctx.db, userId, stage, request, now);
+  const token = createSession(ctx.db, userId, stage, { userAgent: request.userAgent, tailnetLogin: sessionBinding(request) }, now);
   if (stage === "full") logEvent(ctx.db, userId, "signed-in", now, "dev server, no authenticator");
   await setSessionCookie(token, stage, request.https);
   redirect(homeFor(stage));
@@ -145,7 +147,7 @@ export async function verifyAction(_prev: FormState, form: FormData): Promise<Fo
     return { error: "That code isn't right. Codes change every 30 seconds — try the current one." };
   }
   const token = advanceSession(ctx.db, session, "full", now);
-  logEvent(ctx.db, user.id, "signed-in", now, `${how}${request.tailnetLogin ? ` from ${request.tailnetLogin}` : " on this Mac"}`);
+  logEvent(ctx.db, user.id, "signed-in", now, `${how}${describeSource(request)}`);
   await setSessionCookie(token, "full", request.https);
   redirect("/");
 }

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { checkNetwork, parseAllowedLogins } from "@/lib/network-gate";
+import { publicAccessEnabled } from "@/lib/public-access";
 import { contentSecurityPolicy, staticSecurityHeaders } from "@/lib/security-headers";
 
 /**
@@ -8,7 +9,8 @@ import { contentSecurityPolicy, staticSecurityHeaders } from "@/lib/security-hea
  * (In Next 16 this file is `proxy.ts`; `middleware.ts` is the deprecated name.)
  *
  * The gate (lib/network-gate.ts) refuses anything that didn't come from this
- * Mac or from a tailnet member, before any page — sign-in included — renders.
+ * Mac or from a tailnet member (or, with public access on, over Funnel),
+ * before any page — sign-in included — renders.
  * Past it, a missing session cookie is sent to sign in; whether a cookie is
  * actually good is decided next to the data, in server/auth.ts.
  */
@@ -26,6 +28,7 @@ export function proxy(request: NextRequest) {
   const gate = checkNetwork(
     (name) => request.headers.get(name),
     parseAllowedLogins(process.env.MONEYRIGHT_ALLOWED_LOGINS),
+    { allowPublic: publicAccessEnabled() },
   );
   if (!gate.ok) {
     console.warn(`[moneyright] refused ${request.method} ${request.nextUrl.pathname}: ${gate.reason}`);

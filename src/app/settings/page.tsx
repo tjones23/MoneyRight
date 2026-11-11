@@ -15,7 +15,14 @@ import { listPasskeys } from "@/server/passkeys";
 import { removePasskeyAction } from "@/app/actions/passkeys";
 import { requireUser } from "@/server/auth";
 import { appContext } from "@/server/context";
-import { listOpenInvites, listSessions, listUsers, recentEvents, unusedRecoveryCodeCount } from "@/server/accounts";
+import {
+  listOpenInvites,
+  listSessions,
+  listUsers,
+  PUBLIC_SESSION,
+  recentEvents,
+  unusedRecoveryCodeCount,
+} from "@/server/accounts";
 import { resetTotpAction, revokeInviteAction, revokeSessionAction, signOutOthersAction } from "@/app/actions/settings";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -105,7 +112,7 @@ export default async function SettingsPage() {
                     {s.idHash === session.idHash && <span className="ml-2 text-xs text-accent">this browser</span>}
                   </p>
                   <p className="text-xs text-muted">
-                    {s.tailnetLogin ?? "this Mac"} · signed in {when.format(s.createdAt)}
+                    {s.tailnetLogin === PUBLIC_SESSION ? "the internet" : (s.tailnetLogin ?? "this Mac")} · signed in {when.format(s.createdAt)}
                   </p>
                 </div>
                 {s.idHash !== session.idHash && (

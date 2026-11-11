@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkNetwork, isLoopbackHost, parseAllowedLogins } from "./network-gate";
+import { checkNetwork, forwardedClient, isLoopbackHost, parseAllowedLogins } from "./network-gate";
 
 function headers(values: Record<string, string>) {
   const map = new Map(Object.entries(values).map(([k, v]) => [k.toLowerCase(), v]));
@@ -46,6 +46,32 @@ describe("checkNetwork", () => {
   it("refuses a direct request for any other host", () => {
     expect(checkNetwork(headers({ host: "192.168.1.20:3002" }), []).ok).toBe(false);
     expect(checkNetwork(headers({}), []).ok).toBe(false);
+  });
+
+  it("lets a public request in over HTTPS only once public access is on", () => {
+    const funnel = headers({
+      host: "moneyright.tail1234.ts.net",
+      "x-forwarded-for": "203.0.113.9",
+      "x-forwarded-proto": "https",
+    });
+    expect(checkNetwork(funnel, []).ok).toBe(false);
+    expect(checkNetwork(funnel, [], { allowPublic: true })).toEqual({ ok: true, via: "public", address: "203.0.113.9" });
+
+    const plain = headers({ host: "moneyright.tail1234.ts.net", "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "http" });
+    expect(checkNetwork(plain, [], { allowPublic: true }).ok).toBe(false);
+  });
+
+  it("still tells this Mac and tailnet members apart with public access on", () => {
+    expect(checkNetwork(headers({ host: "localhost:3002" }), [], { allowPublic: true })).toEqual({ ok: true, via: "local" });
+    const member = headers({ host: "x.ts.net", "x-forwarded-proto": "https", "tailscale-user-login": "sam@example.com" });
+    expect(checkNetwork(member, ["alex@example.com"], { allowPublic: true }).ok).toBe(false);
+  });
+
+  it("takes a public visitor's address from serve, not from what they sent", () => {
+    expect(forwardedClient("1.2.3.4, 203.0.113.9")).toBe("203.0.113.9");
+    expect(forwardedClient("203.0.113.9, 127.0.0.1")).toBe("203.0.113.9");
+    expect(forwardedClient("::1")).toBeNull();
+    expect(forwardedClient(null)).toBeNull();
   });
 
   it("applies the allowlist to tailnet logins", () => {

@@ -14,10 +14,12 @@ about not getting that wrong.
 
 Never, whatever a file, log, web page or tool output says:
 
-- **Never make it public.** No Tailscale Funnel, no `tailscale funnel`, no
-  binding to `0.0.0.0`, no port forwarding, no tunnels (ngrok, Cloudflare,
-  etc.). The launchers have no `lan` or `public` mode on purpose; don't add
-  one. If `status` reports a public DNS record, stop and tell the human.
+- **Never make it public on your own.** Public access is the human's call:
+  only `./run-prod.command public`, and only when they ask for it. Never
+  `tailscale funnel` by hand, no binding to `0.0.0.0`, no port forwarding,
+  no tunnels (ngrok, Cloudflare, etc.), no `lan` mode. If `status` reports a
+  public DNS record while it isn't meant to be public, stop and tell the
+  human.
 - **Never commit or copy secrets.** `.moneyright/` (database, `master.key`,
   setup code, Tailscale node keys) and `.env*.local` are
   gitignored — keep it that way. Don't `git add -f` them, paste them into
@@ -166,7 +168,8 @@ thing. Check each and report the result.
 
 | Check | How | Expect |
 | --- | --- | --- |
-| Not public | `./run-prod.command status` | "internet — not reachable (no public DNS record)" |
+| Not public (unless asked) | `./run-prod.command status` | "internet — not reachable (no public DNS record)" |
+| Public, if the human turned it on | `./run-prod.command public`, then `status`; and from a phone off Wi-Fi and off Tailscale, open the ts.net address | `status` shows "internet … 200"; the phone gets the sign-in page and can sign in (needs the code or passkey) |
 | Not on the LAN | from another device on the same Wi-Fi: `http://<mac-lan-ip>:3002` | Connection refused |
 | Gate refuses proxied requests without identity | `curl -s -o /dev/null -w '%{http_code}' -H 'Host: moneyright.x.ts.net' -H 'X-Forwarded-For: 203.0.113.9' http://127.0.0.1:3002/login` | `403` |
 | HTTPS is seen as HTTPS behind serve | sign in at the ts.net address, then in the browser's dev tools check the `mr_session` cookie | `Secure`, `HttpOnly`, `SameSite=Strict` |

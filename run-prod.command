@@ -12,6 +12,8 @@
 #
 #   ./run-prod.command tailnet     # host on MoneyRight's own Tailscale node, over HTTPS (+ keep awake)
 #   ./run-prod.command tailnet off
+#   ./run-prod.command public      # ...and to the internet, via Tailscale Funnel (+ keep awake)
+#   ./run-prod.command public off  # back to tailnet-only
 #
 #   ./run-prod.command status
 #   ./run-prod.command logs        # follow the log; any key stops following
@@ -22,9 +24,13 @@
 # Starting never builds, and building never starts: `rebuild` is how new code
 # gets in. Nothing here ever opens a browser.
 #
-# Unlike Outside's launcher there is no `lan` and no `public`: MoneyRight
-# holds financial data, so it is served to this Mac and to the tailnet, and
-# nowhere else. If Funnel is ever found on for its node, it's turned off.
+# `public` is the same tailnet address, opened to the internet with Tailscale
+# Funnel, as in Outside's launcher: anyone with the link reaches the sign-in
+# page, and an account (password plus authenticator or passkey) is all that
+# stands in front of the data. It also writes the marker the app's network
+# gate needs before it lets a public request in; Funnel found on without it
+# is turned off. Unlike Outside there is no `lan`: the server only ever binds
+# 127.0.0.1.
 
 set -uo pipefail
 
@@ -253,12 +259,107 @@ tailnet_on() {
 
 tailnet_off() {
   if [ -z "$(ts_serve_url)" ]; then
+    rm -f "$PUBLIC_MARKER"
     say "Not hosted on the tailnet."
     return 0
   fi
   ts_unserve || return 1
   ts_daemon_stop
   sync_awake
+}
+
+# Funnel is `serve` with public ingress switched on: same proxy, same
+# address, just reachable from the internet rather than only the tailnet.
+public_on() {
+  require_tailscale || return 1
+  port_is_production || return 1
+
+  if public_active; then
+    ok "Already public."
+    print_urls
+    return 0
+  fi
+
+  ts_connect || return 1
+
+  if ! is_running; then
+    launch_server prod || return 1
+  fi
+
+  if [ -z "$(ts_serve_url)" ] && ! ts serve --bg --https="$TS_HTTPS_PORT" "$PORT" >/dev/null 2>&1; then
+    err "tailscale serve failed — production is running, but not on the tailnet."
+    say "  ${DIM}Run 'tailscale --socket=$TS_SOCKET serve --bg --https=$TS_HTTPS_PORT $PORT' yourself to see why.${RESET}"
+    return 1
+  fi
+
+  # The marker goes down before Funnel comes up, so the first visitor isn't
+  # refused — and nothing reaches the app from the internet without Funnel.
+  mkdir -p "$STATE_DIR" && : > "$PUBLIC_MARKER" || return 1
+
+  # --yes skips the CLI's own interactive "Continue?" confirmation. But when
+  # Funnel has never been approved for this tailnet/node, the CLI doesn't
+  # fail — it prints a one-time setup URL and then blocks, polling until
+  # someone opens it. Captured into $funnel_out below, that message is
+  # invisible and the command never returns on its own, so it's bounded here
+  # the same way ts_connect bounds `tailscale up`.
+  local funnel_out
+  funnel_out="$(mktemp -t moneyright-funnel)" || { rm -f "$PUBLIC_MARKER"; return 1; }
+  ts funnel --bg --yes --https="$TS_HTTPS_PORT" "$PORT" >"$funnel_out" 2>&1 &
+  local funnel_pid=$! waited=0
+  while [ "$waited" -lt 10 ] && kill -0 "$funnel_pid" 2>/dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+
+  if kill -0 "$funnel_pid" 2>/dev/null; then
+    kill_tree "$funnel_pid" KILL
+    rm -f "$PUBLIC_MARKER"
+    err "Funnel needs a one-time approval — production is on the tailnet, but not public yet."
+    sed 's/^/  /' "$funnel_out"
+    say "  ${DIM}Open that link, approve Funnel for this node, then run '$SELF public' again.${RESET}"
+    rm -f "$funnel_out"
+    return 1
+  fi
+
+  wait "$funnel_pid" 2>/dev/null
+  local funnel_rc=$?
+  if [ "$funnel_rc" -ne 0 ] || ! ts_public; then
+    rm -f "$PUBLIC_MARKER"
+    err "tailscale funnel failed — production is on the tailnet, but not public."
+    sed 's/^/  /' "$funnel_out"
+    say "  ${DIM}Funnel may need enabling for this tailnet or node — see https://tailscale.com/kb/1223/funnel${RESET}"
+    rm -f "$funnel_out"
+    return 1
+  fi
+  rm -f "$funnel_out"
+
+  sync_awake
+  warn "Public: anyone with this link can now reach MoneyRight's sign-in page, not just your tailnet."
+  say "  ${DIM}MONEYRIGHT_ALLOWED_LOGINS only narrows tailnet access; from the internet, an account is the only lock.${RESET}"
+  ok "Hosted publicly."
+  print_urls
+}
+
+public_off() {
+  if ! ts_public; then
+    rm -f "$PUBLIC_MARKER"
+    say "Not public."
+    return 0
+  fi
+
+  # Marker first: the app stops letting the internet in at once, even if
+  # Funnel then takes a moment (or fails) to come down.
+  rm -f "$PUBLIC_MARKER"
+  ts_unfunnel || return 1
+  # ts_unfunnel can take the plain tailnet listener down with it on some
+  # Tailscale versions; put it back so this always ends up tailnet-only,
+  # never fully withdrawn.
+  if [ -z "$(ts_serve_url)" ]; then
+    ts serve --bg --https="$TS_HTTPS_PORT" "$PORT" >/dev/null 2>&1
+  fi
+  sync_awake
+  ok "No longer public — still on the tailnet."
+  print_urls
 }
 
 # ---------------------------------------------------------------------------
@@ -268,6 +369,10 @@ tailnet_off() {
 
 tailnet_toggle() {
   if [ -n "$(ts_serve_url)" ]; then tailnet_off; else tailnet_on; fi
+}
+
+public_toggle() {
+  if public_active; then public_off; else public_on; fi
 }
 
 prod_restart() {
@@ -292,6 +397,11 @@ menu() {
       say "  5) Host on the tailnet"
     fi
     say "  6) Show logs"
+    if public_active; then
+      say "  7) Stop public access"
+    else
+      say "  7) Make public"
+    fi
     say "  q) Quit"
 
     read_choice || return 0
@@ -302,15 +412,16 @@ menu() {
       4) run_op prod_rebuild ;;
       5) run_op tailnet_toggle ;;
       6) follow_log "$LOG_FILE" ;;
+      7) run_op public_toggle ;;
       q|Q) say "Bye. Anything still running keeps running."; return 0 ;;
       "") ;;
-      *) warn "Pick 1–6, or q to quit." ;;
+      *) warn "Pick 1–7, or q to quit." ;;
     esac
   done
 }
 
 usage() {
-  say "Try: start | stop | restart | rebuild | tailnet [off] | status | logs | setup"
+  say "Try: start | stop | restart | rebuild | tailnet [off] | public [off] | status | logs | setup"
 }
 
 case "${1:-}" in
@@ -325,8 +436,15 @@ case "${1:-}" in
       *)   err "Unknown option: $2"; usage; exit 1 ;;
     esac
     ;;
-  lan|public)
-    err "MoneyRight is only ever served to this Mac and the tailnet — there is no '$1'."
+  public)
+    case "${2:-on}" in
+      on)  run_op public_on ;;
+      off) run_op public_off ;;
+      *)   err "Unknown option: $2"; usage; exit 1 ;;
+    esac
+    ;;
+  lan)
+    err "MoneyRight is never served to the local network — there is no 'lan'. Use 'public' to reach it from off the tailnet."
     exit 1
     ;;
   status)  status ;;

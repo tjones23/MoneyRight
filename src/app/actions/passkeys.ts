@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
 import { appContext } from "@/server/context";
 import { AccountError, advanceSession, logEvent } from "@/server/accounts";
-import { allowAttempt, requireStage, requireUser, setSessionCookie } from "@/server/auth";
+import { allowAttempt, describeSource, requireStage, requireUser, setSessionCookie } from "@/server/auth";
 import { finishAuthentication, finishRegistration, removePasskey, startAuthentication, startRegistration } from "@/server/passkeys";
 
 /** Adding, using and removing passkeys. See server/passkeys.ts. */
@@ -51,7 +51,7 @@ export async function passkeySignInAction(response: AuthenticationResponseJSON):
     return { ok: false, error: "That passkey didn't work. Try again, or use your authenticator code." };
   }
   const token = advanceSession(ctx.db, session, "full", now);
-  logEvent(ctx.db, user.id, "signed-in", now, `passkey${request.tailnetLogin ? ` from ${request.tailnetLogin}` : " on this Mac"}`);
+  logEvent(ctx.db, user.id, "signed-in", now, `passkey${describeSource(request)}`);
   await setSessionCookie(token, "full", request.https);
   redirect("/");
 }
