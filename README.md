@@ -9,14 +9,6 @@ internet through Tailscale Funnel. It pays for nothing: bank links use
 Plaid's free Trial plan, and federal student loans, which no free
 aggregator covers, follow their amortization schedule.
 
-Hosted the same way as [Outside](https://github.com/tjones23/Outside) and
-[WhatsGood](https://github.com/tjones23/WhatsGood), minus the LAN mode.
-
-> **Status: all four phases done** — see [docs/PLAN.md](docs/PLAN.md).
-
-> **Setting it up on the host Mac with an agent?** Point it at
-> [docs/HOSTING-HANDOFF.md](docs/HOSTING-HANDOFF.md).
-
 ## Setup
 
 Needs Node 24.7 or newer (for the built-in `node:sqlite` and argon2).
