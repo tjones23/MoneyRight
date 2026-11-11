@@ -38,7 +38,7 @@ describe("export", () => {
   it("has the person's data and none of their secrets", () => {
     const data = exportUserData(ctx, alex);
     expect(data.accounts.map((a) => a.name).sort()).toEqual(["Checking", "Direct Unsub"]);
-    expect(data.balances).toContainEqual({ accountId: data.accounts.find((a) => a.name === "Checking")!.id, day: "2026-10-26", balance: 1234.56 });
+    expect(data.balances).toContainEqual({ accountId: data.accounts.find((a) => a.name === "Checking")!.id, day: "2026-10-26", balance: 1234.56, estimated: false });
     expect(data.loanSchedules[0]).toMatchObject({ servicer: "MOHELA", ratePercent: 5 });
     const text = JSON.stringify(data);
     expect(text).not.toContain("token_secret_value");

@@ -16,6 +16,8 @@ import { formatCents } from "@/lib/money";
 export interface TrendPoint {
   day: string;
   cents: number | null;
+  /** Worked back from transactions rather than read: drawn dashed. */
+  estimated?: boolean;
 }
 
 const W = 1000;
@@ -56,9 +58,21 @@ export function TrendChart({ points, label }: { points: TrendPoint[]; label: str
     points.forEach((p, i) => (p.cents === null ? flush() : run.push([x(i), y(p.cents)])));
     flush();
 
+    // With estimates, the line goes segment by segment: out of an estimated day dashed, otherwise solid.
+    let dashed = "";
+    let solid = "";
+    points.forEach((p, i) => {
+      const next = points[i + 1];
+      if (p.cents === null || !next || next.cents === null) return;
+      const segment = `M${x(i).toFixed(1)},${y(p.cents).toFixed(2)}L${x(i + 1).toFixed(1)},${y(next.cents).toFixed(2)}`;
+      if (p.estimated) dashed += segment;
+      else solid += segment;
+    });
+    if (dashed) line = solid;
+
     let last = points.length - 1;
     while (last >= 0 && points[last].cents === null) last--;
-    return { ticks, lo, hi, x, y, line, area, last, zero: lo < 0 && hi > 0 ? y(0) : null };
+    return { ticks, lo, hi, x, y, line, dashed, area, last, zero: lo < 0 && hi > 0 ? y(0) : null };
   }, [points]);
 
   if (!geometry) {
@@ -69,7 +83,7 @@ export function TrendChart({ points, label }: { points: TrendPoint[]; label: str
     );
   }
 
-  const { ticks, x, y, line, area, last, zero } = geometry;
+  const { ticks, x, y, line, dashed, area, last, zero } = geometry;
   const pct = (px: number) => `${(px / W) * 100}%`;
   const pctY = (py: number) => `${(py / H) * 100}%`;
   const shown = active ?? null;
@@ -127,6 +141,17 @@ export function TrendChart({ points, label }: { points: TrendPoint[]; label: str
             strokeLinecap="round"
             vectorEffect="non-scaling-stroke"
           />
+          {dashed && (
+            <path
+              d={dashed}
+              fill="none"
+              stroke="var(--chart-line)"
+              strokeWidth={2}
+              strokeDasharray="4 4"
+              strokeLinecap="butt"
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
         </svg>
 
         {/* Y ticks: muted, just above their gridlines. */}
@@ -176,7 +201,10 @@ export function TrendChart({ points, label }: { points: TrendPoint[]; label: str
               }
             >
               <p className="font-semibold tabular-nums">{shownPoint.cents === null ? "No balance yet" : formatCents(shownPoint.cents)}</p>
-              <p className="text-xs text-muted">{dayFormat.format(utc(shownPoint.day))}</p>
+              <p className="text-xs text-muted">
+                {dayFormat.format(utc(shownPoint.day))}
+                {shownPoint.estimated && " · estimated"}
+              </p>
             </div>
           </>
         )}

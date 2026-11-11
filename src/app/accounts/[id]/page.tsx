@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageBody, SiteHeader } from "@/components/SiteHeader";
-import { HistoryTable, RangeFilter } from "@/components/History";
+import { EstimateNote, HistoryTable, RangeFilter } from "@/components/History";
 import { TrendChart } from "@/components/TrendChart";
 import { requireUser } from "@/server/auth";
 import { appContext } from "@/server/context";
@@ -74,8 +74,11 @@ export default async function AccountPage({ params, searchParams }: PageProps<"/
             <h2 className="text-lg font-semibold">{label} over time</h2>
             <RangeFilter range={range} basePath={`/accounts/${account.id}`} />
           </div>
-          <TrendChart label={label} points={series.map((p) => ({ day: p.day, cents: p.balanceCents }))} />
-          <HistoryTable label={label} rows={series.map((p) => ({ day: p.day, cents: p.balanceCents }))} />
+          <TrendChart label={label} points={series.map((p) => ({ day: p.day, cents: p.balanceCents, estimated: p.estimated }))} />
+          {series.some((p) => p.estimated) && (
+            <EstimateNote cards={account.kind === "cash" || account.kind === "credit"} investments={account.kind === "investment"} />
+          )}
+          <HistoryTable label={label} rows={series.map((p) => ({ day: p.day, cents: p.balanceCents, estimated: p.estimated }))} />
         </section>
 
         <p className="text-sm">

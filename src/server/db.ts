@@ -259,6 +259,13 @@ const MIGRATIONS: string[] = [
   DROP TABLE asset_valuations;
   ALTER TABLE asset_valuations_new RENAME TO asset_valuations;
   `,
+  // 8: balances worked back from transactions, before an account's first real reading.
+  `
+  -- 1 for a balance estimated from transactions (backfill.ts); a real reading replaces it.
+  ALTER TABLE balance_snapshots ADD COLUMN estimated INTEGER NOT NULL DEFAULT 0;
+  -- When the Item's investment accounts were worked back: once, as their first readings don't move.
+  ALTER TABLE connections ADD COLUMN investments_backfilled_at INTEGER;
+  `,
 ];
 
 export function openDatabase(path: string): DatabaseSync {

@@ -15,12 +15,14 @@ import {
 import { ProviderError } from "./providers/http";
 import { plaidBalanceCents, toLinkedAccount as plaidAccount, type PlaidClient } from "./providers/plaid";
 import { applyTransactions } from "./transactions";
+import { backfillFromTransactions, backfillInvestments, investmentsBackfillDue } from "./backfill";
+import { forecastSettings } from "./planning";
 import { refreshHomeEstimates } from "./home-estimates";
 import type { RentcastClient } from "./providers/rentcast";
 import { homeIndex, homeIndexDue, refreshHomeIndex, type LineSource } from "./home-index";
 import { projectLoan } from "@/lib/amortization";
 import { estimateAsset, type IndexPoint } from "@/lib/valuation";
-import { dateKey } from "@/lib/local-date";
+import { addDays, dateKey } from "@/lib/local-date";
 
 /**
  * Fetching balances: one connection at a time, each writing today's
@@ -74,17 +76,20 @@ async function syncPlaid(ctx: Ctx, plaid: PlaidClient, connection: Connection, t
     const { balance, available } = plaidBalanceCents(account);
     if (balance !== null) recordBalance(ctx.db, ids.get(account.account_id)!, day, balance, available, now);
   }
-  await syncTransactions(ctx, plaid, connection, token, ids, now);
+  await syncHistory(ctx, plaid, connection, token, ids, now);
   return accounts.length;
 }
 
+/** How far back Plaid keeps investment transactions. */
+const INVESTMENT_HISTORY_DAYS = 730;
+
 /**
- * New, changed and removed transactions since the last sync — only for an
- * Item that already has Transactions (asking any other would add the product
- * and its billing). A failure here is logged and retried next refresh; the
- * balances above still count.
+ * New, changed and removed transactions since the last sync, and the
+ * history worked back from them — only from products the Item already has
+ * (asking for any other would add it, and its billing). A failure here is
+ * logged and retried next refresh; the balances above still count.
  */
-async function syncTransactions(
+async function syncHistory(
   ctx: Ctx,
   plaid: PlaidClient,
   connection: Connection,
@@ -92,15 +97,26 @@ async function syncTransactions(
   ids: Map<string, number>,
   now: number,
 ) {
+  let step = "products";
   try {
     const products = await plaid.getItemProducts(token);
     setConnectionProducts(ctx.db, connection.id, products);
-    if (!products.includes("transactions")) return;
-    const page = await plaid.syncTransactions(token, transactionsCursor(ctx.db, connection.id));
-    applyTransactions(ctx.db, connection.id, ids, page, now);
+    if (products.includes("transactions")) {
+      step = "transactions";
+      const page = await plaid.syncTransactions(token, transactionsCursor(ctx.db, connection.id));
+      applyTransactions(ctx.db, connection.id, ids, page, now);
+      backfillFromTransactions(ctx.db, connection.id, now);
+    }
+    if (products.includes("investments") && investmentsBackfillDue(ctx.db, connection.id)) {
+      step = "investment history";
+      const today = dateKey(now);
+      const moves = await plaid.getInvestmentTransactions(token, addDays(today, -INVESTMENT_HISTORY_DAYS), today);
+      const { investmentReturnBps } = forecastSettings(ctx.db, connection.userId);
+      backfillInvestments(ctx.db, connection.id, ids, moves, investmentReturnBps, now);
+    }
   } catch (error) {
     const code = error instanceof ProviderError ? error.code : "unexpected";
-    console.warn(`[moneyright] transactions for connection #${connection.id} failed: ${code}`);
+    console.warn(`[moneyright] ${step} for connection #${connection.id} failed: ${code}`);
   }
 }
 

@@ -111,6 +111,15 @@ start bringing them in on their next refresh, and new ones ask for two
 years of history. Investment- and loan-only links are never asked for
 transactions: on those, Plaid would add the product and bill for it.
 
+**History from before linking** is worked back from transactions, since
+Plaid only gives today's balance. Bank and card balances are the first
+reading less every posted transaction since, redone after each sync.
+Investment accounts are rougher, as there's no price source: Plaid's
+investment transactions (fetched once per link, up to two years) give the
+money put in and taken out, and the rest is put down to growth at the
+forecast's assumed return. Estimated days are dashed on the charts and
+marked in tables and exports; a real reading always replaces an estimate.
+
 **Forecast** projects net worth from everything above plus your monthly
 savings (the last six months' average from transactions, unless you set
 one) and an assumed investment return; goals are checked against it.
@@ -252,6 +261,7 @@ src/lib/               pure, framework-free, unit-tested
   account-kinds.ts     Plaid types → cash, investment, property, credit, mortgage…
   net-worth.ts         assets − liabilities
   history.ts           daily series from sparse snapshots; what changed, and why
+  backfill.ts          working balances back from transactions, and investments from contributions
   backup-format.ts     the encrypted backup file, and which ones to keep
 src/server/            the database, identity and bank data
   db.ts                node:sqlite, migrations in PRAGMA user_version
@@ -262,6 +272,7 @@ src/server/            the database, identity and bank data
   home-index.ts        Zillow's ZIP-code home value index: download, parse, keep what's used
   home-estimates.ts    homes valued by address through RentCast: monthly, capped at 40 a month
   transactions.ts      Plaid transaction sync results, stored and read per user
+  backfill.ts          balances before linking, saved as estimated snapshots
   planning.ts          forecast assumptions, goals, and the forecast's inputs
   sync.ts              one refresh pass: fetch, snapshot, record errors by code
   scheduler.ts         the hourly timer that runs it, and the nightly backup

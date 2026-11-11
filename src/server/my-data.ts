@@ -44,6 +44,8 @@ export function exportUserData(ctx: Ctx, userId: number) {
       accountId: s.accountId,
       day: s.day,
       balance: s.balanceCents / 100,
+      // Worked back from transactions, before the account was linked.
+      estimated: s.estimated,
     })),
     loanSchedules: listScheduledLoans(ctx.db, userId).map((l) => ({
       accountId: l.accountId,

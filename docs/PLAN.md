@@ -41,7 +41,10 @@ change, an extra payment) re-anchors the schedule from that date.
 3. **History — done.** Net-worth trend chart (30 days / 90 days / 1 year /
    all) with a crosshair tooltip and a table view; per-account history pages;
    "what changed", which keeps newly linked accounts apart from real change
-   so linking a brokerage doesn't read as a gain.
+   so linking a brokerage doesn't read as a gain. Backfill: bank and card
+   balances before linking, worked back from transactions; investment
+   accounts roughly, from contributions and withdrawals plus the assumed
+   return. Shown dashed, as estimates.
 4. **Polish — done.** Encrypted nightly backups (14 daily, 12 monthly),
    restorable only with master.key, which is kept apart; `npm run
    moneyright` for backup / restore / reset-2fa / reset-password on this

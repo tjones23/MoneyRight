@@ -268,7 +268,8 @@ export function recordBalance(
   db.prepare(
     `INSERT INTO balance_snapshots (account_id, day, balance_cents, available_cents, recorded_at) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT (account_id, day) DO UPDATE SET
-       balance_cents = excluded.balance_cents, available_cents = excluded.available_cents, recorded_at = excluded.recorded_at`,
+       balance_cents = excluded.balance_cents, available_cents = excluded.available_cents, recorded_at = excluded.recorded_at,
+       estimated = 0`,
   ).run(accountId, day, balanceCents, availableCents, now);
 }
 
@@ -323,17 +324,22 @@ export function listAccounts(db: DatabaseSync, userId: number): AccountView[] {
   }));
 }
 
-/** Every snapshot of the user's accounts (or one of them) up to `to`. */
+/** Every snapshot of the user's accounts (or one of them) up to `to`, estimated ones marked. */
 export function snapshots(db: DatabaseSync, userId: number, to: DateKey, accountId?: number) {
   return db
     .prepare(
-      `SELECT s.account_id, s.day, s.balance_cents FROM balance_snapshots s
+      `SELECT s.account_id, s.day, s.balance_cents, s.estimated FROM balance_snapshots s
        JOIN accounts a ON a.id = s.account_id
        WHERE a.user_id = ? AND s.day <= ? ${accountId === undefined ? "" : "AND a.id = ?"}
        ORDER BY s.day`,
     )
     .all(userId, to, ...(accountId === undefined ? [] : [accountId]))
-    .map((r) => ({ accountId: r.account_id as number, day: r.day as string, balanceCents: r.balance_cents as number }));
+    .map((r) => ({
+      accountId: r.account_id as number,
+      day: r.day as string,
+      balanceCents: r.balance_cents as number,
+      estimated: r.estimated === 1,
+    }));
 }
 
 /** One of the user's accounts, or null. */

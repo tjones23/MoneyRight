@@ -64,6 +64,19 @@ export interface PlaidTransaction {
   personal_finance_category?: { primary?: string | null; detailed?: string | null } | null;
 }
 
+export interface PlaidInvestmentTransaction {
+  investment_transaction_id: string;
+  account_id: string;
+  date: string;
+  /** Positive is cash out of the account (a buy); negative, cash in (a sale, a deposit). */
+  amount: number;
+  type: string;
+  subtype: string | null;
+  quantity: number | null;
+  price: number | null;
+  iso_currency_code: string | null;
+}
+
 export interface TransactionsPage {
   added: PlaidTransaction[];
   modified: PlaidTransaction[];
@@ -74,6 +87,8 @@ export interface TransactionsPage {
 
 /** 500 a page: 25,000 changes in one go is past two years of anyone's spending. */
 const MAX_SYNC_PAGES = 50;
+/** The same ceiling for investment transactions, fetched by offset. */
+const MAX_INVESTMENT_PAGES = 50;
 
 export class PlaidClient {
   constructor(
@@ -176,6 +191,23 @@ export class PlaidClient {
         const restart = error instanceof ProviderError && error.code === "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION";
         if (!restart || attempt >= 2) throw error;
       }
+    }
+  }
+
+  /**
+   * Investment transactions from `startDate` to `endDate` (Plaid keeps up to
+   * 24 months), every page. Only for an Item that already has Investments.
+   */
+  async getInvestmentTransactions(accessToken: string, startDate: string, endDate: string): Promise<PlaidInvestmentTransaction[]> {
+    const all: PlaidInvestmentTransaction[] = [];
+    for (let pages = 0; ; pages++) {
+      if (pages >= MAX_INVESTMENT_PAGES) throw new ProviderError("plaid", 0, "too_many_pages", false, true);
+      const res = await this.post<{ investment_transactions: PlaidInvestmentTransaction[]; total_investment_transactions: number }>(
+        "/investments/transactions/get",
+        { access_token: accessToken, start_date: startDate, end_date: endDate, options: { count: 500, offset: all.length } },
+      );
+      all.push(...res.investment_transactions);
+      if (res.investment_transactions.length === 0 || all.length >= res.total_investment_transactions) return all;
     }
   }
 
