@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageBody, SiteHeader } from "@/components/SiteHeader";
-import { PlaidLinkForm, PlaidReconnectButton, RefreshButton } from "@/components/LinkButtons";
+import { PlaidLinkForm, PlaidReconnectButton, RefreshAllButton, RefreshButton } from "@/components/LinkButtons";
 import { AddLoanForm, EditLoanForm, type LoanDefaults } from "@/components/LoanForms";
 import { AddAssetForm, EditAssetForm, type AssetDefaults } from "@/components/AssetForms";
 import { AssetLoansForm } from "@/components/PlanForms";
@@ -139,6 +139,13 @@ export default async function AccountsPage() {
             <SetupHint>Plaid isn&apos;t set up yet: set PLAID_CLIENT_ID and PLAID_SECRET. See the README&apos;s “Linking accounts”.</SetupHint>
           )}
         </Section>
+
+        {connections.length > 1 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-5 py-3">
+            <p className="text-sm text-muted">{connections.length} linked institutions</p>
+            <RefreshAllButton />
+          </div>
+        )}
 
         {connections.map((c) => (
           <Section

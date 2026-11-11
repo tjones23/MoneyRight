@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import {
   linkPlaidAction,
   plaidLinkTokenAction,
+  refreshAllConnectionsAction,
   refreshConnectionAction,
   type LinkResult,
 } from "@/app/actions/linking";
@@ -171,6 +172,24 @@ export function RefreshButton({ connectionId }: { connectionId: number }) {
         className={buttonStyles.quiet}
       >
         {pending ? "Refreshing…" : "Refresh"}
+      </button>
+      <Message result={result} />
+    </div>
+  );
+}
+
+export function RefreshAllButton() {
+  const [pending, startTransition] = useTransition();
+  const [result, setResult] = useState<LinkResult | null>(null);
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => startTransition(async () => setResult(await refreshAllConnectionsAction()))}
+        className={buttonStyles.quiet}
+      >
+        {pending ? "Refreshing all…" : "Refresh all"}
       </button>
       <Message result={result} />
     </div>

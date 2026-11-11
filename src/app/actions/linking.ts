@@ -9,6 +9,7 @@ import {
   countPlaidItem,
   deleteConnection,
   getConnection,
+  listConnections,
   PLAID_TRIAL_ITEMS,
   plaidItemsUsed,
   saveConnection,
@@ -126,6 +127,27 @@ export async function refreshConnectionAction(connectionId: number): Promise<Lin
   if (result.status === "ok") return { ok: true, message: `${connection.institutionName} is up to date.` };
   if (result.status === "reconnect") return { ok: false, error: `${connection.institutionName} needs you to sign in again.` };
   return { ok: false, error: `${connection.institutionName} couldn't be refreshed (${result.code}). It'll retry within the hour.` };
+}
+
+/** The Refresh all button: every linked institution at once. */
+export async function refreshAllConnectionsAction(): Promise<LinkResult> {
+  const { user, request } = await requireUser();
+  if (!allowAttempt("refresh", user.username, request)) return { ok: false, error: "Refreshed a lot just now — wait a few minutes." };
+  const ctx = appContext();
+  const connections = listConnections(ctx.db, user.id);
+  if (connections.length === 0) return { ok: false, error: "Nothing is linked yet." };
+  const now = Date.now();
+  const results = await Promise.all(connections.map((c) => syncConnection(ctx, providers(), c, now)));
+  refresh();
+  const problems = connections.flatMap((c, i) => {
+    const result = results[i];
+    if (result.status === "ok") return [];
+    if (result.status === "reconnect") return [`${c.institutionName} needs you to sign in again.`];
+    return [`${c.institutionName} couldn't be refreshed (${result.code}).`];
+  });
+  const total = connections.length;
+  if (problems.length === 0) return { ok: true, message: total === 1 ? "Up to date." : `All ${total} up to date.` };
+  return { ok: false, error: `${total - problems.length} of ${total} up to date. ${problems.join(" ")}` };
 }
 
 /** Revokes access at the provider (best effort), then forgets the connection and its history. */
