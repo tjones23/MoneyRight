@@ -133,22 +133,27 @@ export function syncAssets(ctx: Ctx, now: number, userId?: number) {
 let homeIndexRunning: Promise<boolean> | null = null;
 
 export function syncHomeIndex(ctx: Ctx, now: number, source?: LineSource): Promise<boolean> {
-  homeIndexRunning ??= (async () => {
+  if (homeIndexRunning) return homeIndexRunning;
+  const run = (async () => {
+    if (!homeIndexDue(ctx.db, now)) return false;
     try {
-      if (!homeIndexDue(ctx.db, now)) return false;
-      try {
-        const found = await refreshHomeIndex(ctx.db, now, source);
-        console.log(`[moneyright] home value index refreshed for ${found} ZIP code${found === 1 ? "" : "s"}`);
-      } catch (error) {
-        console.warn("[moneyright] home value index refresh failed:", error instanceof Error ? error.message : "unexpected");
-      }
-      syncAssets(ctx, now);
-      return true;
-    } finally {
-      homeIndexRunning = null;
+      const found = await refreshHomeIndex(ctx.db, now, source);
+      console.log(`[moneyright] home value index refreshed for ${found} ZIP code${found === 1 ? "" : "s"}`);
+    } catch (error) {
+      console.warn("[moneyright] home value index refresh failed:", error instanceof Error ? error.message : "unexpected");
     }
+    syncAssets(ctx, now);
+    return true;
   })();
-  return homeIndexRunning;
+  // Cleared once settled, not from inside: a run that finishes without waiting
+  // (nothing due) would otherwise clear the slot before it's filled, and
+  // leave this finished run answering every later call.
+  homeIndexRunning = run;
+  const clear = () => {
+    if (homeIndexRunning === run) homeIndexRunning = null;
+  };
+  run.then(clear, clear);
+  return run;
 }
 
 /** One pass of the scheduler: every connection that's due, then the loans and assets. */
