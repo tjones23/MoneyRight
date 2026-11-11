@@ -132,6 +132,15 @@ describe("the home value index", () => {
     expect(homeIndexDue(ctx.db, T0 + 60_000)).toBe(false);
   });
 
+  it("downloads once due, after a pass that found nothing due", async () => {
+    let fetched = 0;
+    expect(await syncHomeIndex(ctx, T0, () => (fetched++, lines(CSV)))).toBe(false);
+    addAsset(ctx.db, alex, house, T0);
+    expect(await syncHomeIndex(ctx, T0, () => (fetched++, lines(CSV)))).toBe(true);
+    expect(fetched).toBe(1);
+    expect(homeIndex(ctx.db, "02134")).toHaveLength(2);
+  });
+
   it("forgets a ZIP once no home uses it", async () => {
     const id = addAsset(ctx.db, alex, house, T0);
     await syncHomeIndex(ctx, T0, () => lines(CSV));
