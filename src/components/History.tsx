@@ -24,10 +24,22 @@ export function RangeFilter({ range, basePath }: { range: Range; basePath: strin
   );
 }
 
+/** Under a chart with estimated days: what the dashes mean, for the kinds of account among them. */
+export function EstimateNote({ cards, investments }: { cards: boolean; investments: boolean }) {
+  return (
+    <p className="text-xs text-muted">
+      Dashed days are estimates from before an account was linked.
+      {cards && " Bank and card balances are worked back from their transactions."}
+      {investments &&
+        " Investment accounts are rougher: money put in and taken out is known, and the rest is put down to growth at the forecast's assumed return, as it was when the account was linked."}
+    </p>
+  );
+}
+
 const dayFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 
 /** Every day in the chart, newest first — the chart's values without hovering. */
-export function HistoryTable({ rows, label }: { rows: { day: string; cents: number | null }[]; label: string }) {
+export function HistoryTable({ rows, label }: { rows: { day: string; cents: number | null; estimated?: boolean }[]; label: string }) {
   return (
     <details className="text-sm">
       <summary className="cursor-pointer text-muted">Show as a table</summary>
@@ -43,7 +55,10 @@ export function HistoryTable({ rows, label }: { rows: { day: string; cents: numb
             {[...rows].reverse().map((r) => (
               <tr key={r.day}>
                 <td className="px-3 py-1.5">{dayFormat.format(new Date(`${r.day}T12:00:00Z`))}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums">{r.cents === null ? "—" : formatCents(r.cents)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">
+                  {r.estimated && <span className="mr-2 text-xs text-muted">est.</span>}
+                  {r.cents === null ? "—" : formatCents(r.cents)}
+                </td>
               </tr>
             ))}
           </tbody>

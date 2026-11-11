@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PageBody, SiteHeader } from "@/components/SiteHeader";
 import { requireUser } from "@/server/auth";
 import { appContext } from "@/server/context";
-import { HistoryTable, RangeFilter } from "@/components/History";
+import { EstimateNote, HistoryTable, RangeFilter } from "@/components/History";
 import { TrendChart } from "@/components/TrendChart";
 import { assetLoans, firstBalanceDay, listAccounts, listConnections, snapshots } from "@/server/finance";
 import { isLiability, KIND_LABEL } from "@/lib/account-kinds";
@@ -59,6 +59,8 @@ export default async function OverviewPage({ searchParams }: PageProps<"/">) {
   const series = netWorthSeries(everyAccount, history, from, today);
   const moved = daysBetween(from, today) > 0 ? changes(everyAccount, history, from, today) : null;
   const names = new Map(everyAccount.map((a) => [a.id, a]));
+  // Which kinds of account the chart's estimates come from, to say how each was made.
+  const estimatedKinds = new Set(history.filter((s) => s.estimated).map((s) => names.get(s.accountId)?.kind));
   const movers = moved?.accounts.filter((c) => c.effectCents !== 0).slice(0, 8) ?? [];
   // An asset's value less the loans set against it.
   const equity = new Map<number, number>();
@@ -107,8 +109,20 @@ export default async function OverviewPage({ searchParams }: PageProps<"/">) {
             <h2 className="text-lg font-semibold">Net worth over time</h2>
             <RangeFilter range={range} basePath="/" />
           </div>
-          <TrendChart label="Net worth" points={series.map((p) => ({ day: p.day, cents: p.netWorthCents }))} />
-          <HistoryTable label="Net worth" rows={series.map((p) => ({ day: p.day, cents: p.netWorthCents }))} />
+          <TrendChart
+            label="Net worth"
+            points={series.map((p) => ({ day: p.day, cents: p.netWorthCents, estimated: p.estimated }))}
+          />
+          {series.some((p) => p.estimated) && (
+            <EstimateNote
+              cards={estimatedKinds.has("cash") || estimatedKinds.has("credit")}
+              investments={estimatedKinds.has("investment")}
+            />
+          )}
+          <HistoryTable
+            label="Net worth"
+            rows={series.map((p) => ({ day: p.day, cents: p.netWorthCents, estimated: p.estimated }))}
+          />
         </section>
 
         {movers.length > 0 && (

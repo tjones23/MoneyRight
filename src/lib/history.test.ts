@@ -72,6 +72,38 @@ describe("accountSeries", () => {
     const series = accountSeries([{ accountId: 5, day: "2026-10-02", balanceCents: 10_00 }], "2026-10-01", "2026-10-03");
     expect(series.map((p) => p.balanceCents)).toEqual([null, 10_00, 10_00]);
   });
+
+  it("marks days carried from an estimate, until the first real reading", () => {
+    const series = accountSeries(
+      [
+        { accountId: 5, day: "2026-10-01", balanceCents: 5_00, estimated: true },
+        { accountId: 5, day: "2026-10-03", balanceCents: 10_00 },
+      ],
+      "2026-10-01",
+      "2026-10-04",
+    );
+    expect(series.map((p) => p.estimated)).toEqual([true, true, false, false]);
+  });
+});
+
+describe("estimated net worth", () => {
+  it("is any day counting an estimated balance", () => {
+    const series = netWorthSeries(
+      [cash, brokerage],
+      [
+        { accountId: 1, day: "2026-10-01", balanceCents: 100_00 },
+        { accountId: 3, day: "2026-10-01", balanceCents: 900_00, estimated: true },
+        { accountId: 3, day: "2026-10-02", balanceCents: 1000_00 },
+      ],
+      "2026-10-01",
+      "2026-10-03",
+    );
+    expect(series.map((p) => [p.netWorthCents, p.estimated])).toEqual([
+      [1000_00, true],
+      [1100_00, false],
+      [1100_00, false],
+    ]);
+  });
 });
 
 describe("ranges", () => {

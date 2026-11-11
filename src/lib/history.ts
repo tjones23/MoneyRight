@@ -9,7 +9,8 @@ import { addDays, daysBetween, type DateKey } from "./local-date";
  * one. An account that's gone (closed, deselected) stops at its last
  * snapshot instead of counting forever. An account only joins the total from
  * its first snapshot, so linking one shows up as an addition, not as growth;
- * `changes` keeps the two apart.
+ * `changes` keeps the two apart. A day counting any estimated balance
+ * (worked back from transactions, see backfill.ts) is marked estimated.
  *
  * Pure: everything comes in as arguments.
  */
@@ -25,6 +26,7 @@ export interface Snapshot {
   accountId: number;
   day: DateKey;
   balanceCents: number;
+  estimated?: boolean;
 }
 
 export interface NetWorthPoint {
@@ -32,6 +34,7 @@ export interface NetWorthPoint {
   netWorthCents: number;
   assetsCents: number;
   liabilitiesCents: number;
+  estimated: boolean;
 }
 
 export type Range = "30d" | "90d" | "1y" | "all";
@@ -64,21 +67,25 @@ function* walk(accounts: HistoryAccount[], snapshots: Snapshot[], from: DateKey,
   }
   const cursor = new Map<number, number>();
   const current = new Map<number, number>();
+  const estimated = new Set<number>();
   for (let day = from; daysBetween(day, to) >= 0; day = addDays(day, 1)) {
     for (const account of accounts) {
       const list = byAccount.get(account.id) ?? [];
       let i = cursor.get(account.id) ?? 0;
       while (i < list.length && list[i].day <= day) {
         current.set(account.id, list[i].balanceCents);
+        if (list[i].estimated) estimated.add(account.id);
+        else estimated.delete(account.id);
         i++;
       }
       cursor.set(account.id, i);
       // A gone account stops after its last snapshot.
       if (account.gone && i === list.length && list.length > 0 && list[list.length - 1].day < day) {
         current.delete(account.id);
+        estimated.delete(account.id);
       }
     }
-    yield { day, balances: current };
+    yield { day, balances: current, estimated };
   }
 }
 
@@ -86,24 +93,34 @@ export function netWorthSeries(accounts: HistoryAccount[], snapshots: Snapshot[]
   const counted = accounts.filter((a) => a.includeInNetWorth);
   const kinds = new Map(counted.map((a) => [a.id, a.kind]));
   const points: NetWorthPoint[] = [];
-  for (const { day, balances } of walk(counted, snapshots, from, to)) {
+  for (const { day, balances, estimated } of walk(counted, snapshots, from, to)) {
     let assets = 0;
     let liabilities = 0;
     for (const [id, cents] of balances) {
       if (isLiability(kinds.get(id)!)) liabilities += cents;
       else assets += cents;
     }
-    points.push({ day, netWorthCents: assets - liabilities, assetsCents: assets, liabilitiesCents: liabilities });
+    points.push({
+      day,
+      netWorthCents: assets - liabilities,
+      assetsCents: assets,
+      liabilitiesCents: liabilities,
+      estimated: estimated.size > 0,
+    });
   }
   return points;
 }
 
 /** One account's balance per day, carried forward; null before its first snapshot. */
-export function accountSeries(snapshots: Snapshot[], from: DateKey, to: DateKey): { day: DateKey; balanceCents: number | null }[] {
+export function accountSeries(
+  snapshots: Snapshot[],
+  from: DateKey,
+  to: DateKey,
+): { day: DateKey; balanceCents: number | null; estimated: boolean }[] {
   const account: HistoryAccount = { id: 0, kind: "cash", includeInNetWorth: true, gone: false };
   const points = [];
-  for (const { day, balances } of walk([account], snapshots.map((s) => ({ ...s, accountId: 0 })), from, to)) {
-    points.push({ day, balanceCents: balances.get(0) ?? null });
+  for (const { day, balances, estimated } of walk([account], snapshots.map((s) => ({ ...s, accountId: 0 })), from, to)) {
+    points.push({ day, balanceCents: balances.get(0) ?? null, estimated: estimated.has(0) });
   }
   return points;
 }

@@ -65,7 +65,7 @@ const page = (added: PlaidTransaction[], more: Record<string, unknown> = {}) => 
 
 describe("transactions", () => {
   it("are never asked for on an Item without Transactions — asking would add the product", async () => {
-    const { seen, providers } = fakePlaid(["investments"]);
+    const { seen, providers } = fakePlaid(["liabilities"]);
     await syncConnection(ctx, providers, link(), T0);
     expect(seen.map((r) => new URL(r.url).pathname)).toEqual(["/accounts/get", "/item/get"]);
     expect(transactionsStatus(ctx.db, alex).connections).toBe(0);
