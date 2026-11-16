@@ -5,6 +5,7 @@ import {
   AccountError,
   advanceSession,
   changePassword,
+  changeTotp,
   checkPassword,
   checkSecondFactor,
   confirmTotp,
@@ -187,5 +188,25 @@ describe("invites", () => {
     resetTotp(ctx.db, id, samId, T0);
     expect((await checkPassword(ctx.db, "sam", "sam's long password"))?.hasTotp).toBe(false);
     expect(listSessions(ctx.db, samId)).toHaveLength(0);
+  });
+});
+
+describe("switching authenticator apps", () => {
+  it("takes the password and the new app's code; the old app stops working, recovery codes don't", async () => {
+    const { id, secret: oldSecret, codes } = await enrolledAdmin();
+    const { session } = findSession(ctx.db, createSession(ctx.db, id, "full", local, T0), null, T0)!;
+    const newSecret = pendingTotpSecret(ctx, session);
+    const later = T0 + 5 * 60_000;
+
+    await expect(changeTotp(ctx, session, "wrong password", totp(newSecret, later), later)).rejects.toThrow(AccountError);
+    await expect(changeTotp(ctx, session, admin.password, totp(oldSecret, later), later)).rejects.toThrow(AccountError);
+    await changeTotp(ctx, session, admin.password, totp(newSecret, later), later);
+
+    // The code just used to switch can't sign in too.
+    expect(checkSecondFactor(ctx, id, totp(newSecret, later), later)).toBeNull();
+    const next = later + 60_000;
+    expect(checkSecondFactor(ctx, id, totp(oldSecret, next), next)).toBeNull();
+    expect(checkSecondFactor(ctx, id, totp(newSecret, next), next)).toBe("totp");
+    expect(checkSecondFactor(ctx, id, codes[0], next)).toBe("recovery");
   });
 });

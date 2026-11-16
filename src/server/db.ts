@@ -266,6 +266,49 @@ const MIGRATIONS: string[] = [
   -- When the Item's investment accounts were worked back: once, as their first readings don't move.
   ALTER TABLE connections ADD COLUMN investments_backfilled_at INTEGER;
   `,
+  // 9: approving a sign-in from a phone, by push notification.
+  `
+  -- A browser that gets sign-in requests: usually MoneyRight on a phone's Home Screen.
+  CREATE TABLE push_devices (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    -- The push service URL for this browser; only well-known push services are accepted.
+    endpoint TEXT NOT NULL UNIQUE,
+    -- Sealed JSON {p256dh, auth}: the keys messages are encrypted to.
+    keys TEXT NOT NULL,
+    -- The address it subscribed from, where its approval links open.
+    origin TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER
+  );
+  CREATE INDEX push_devices_user ON push_devices(user_id);
+
+  -- One request in flight per half-signed-in session; gone with the session.
+  CREATE TABLE push_approvals (
+    id INTEGER PRIMARY KEY,
+    session_id_hash TEXT NOT NULL UNIQUE REFERENCES sessions(id_hash) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- Shown on the signing-in screen, typed on the phone: approving takes seeing both.
+    number TEXT NOT NULL,
+    -- Which browser, from where — shown on the phone.
+    detail TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied')),
+    wrong_tries INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    decided_at INTEGER,
+    decided_by INTEGER REFERENCES push_devices(id) ON DELETE SET NULL
+  );
+
+  -- The link each device was sent; SHA-256 of it, like every other bearer value.
+  CREATE TABLE push_approval_links (
+    token_hash TEXT PRIMARY KEY,
+    approval_id INTEGER NOT NULL REFERENCES push_approvals(id) ON DELETE CASCADE,
+    device_id INTEGER NOT NULL REFERENCES push_devices(id) ON DELETE CASCADE
+  );
+  CREATE INDEX push_approval_links_approval ON push_approval_links(approval_id);
+  `,
 ];
 
 export function openDatabase(path: string): DatabaseSync {

@@ -3,6 +3,7 @@
 import { useActionState, useSyncExternalStore } from "react";
 import {
   backupNowAction,
+  changeAuthenticatorAction,
   changePasswordAction,
   createInviteAction,
   deleteAccountAction,
@@ -33,6 +34,26 @@ export function ChangePasswordForm() {
       />
       <Field label="New password again" name="confirm" type="password" autoComplete="new-password" required />
       <Submit>Change password</Submit>
+    </form>
+  );
+}
+
+export function ChangeAuthenticatorForm() {
+  const [state, action] = useActionState(changeAuthenticatorAction, initial);
+  if (state.done) return <FormMessage done={state.done} />;
+  return (
+    <form action={action} className="space-y-4">
+      <FormMessage error={state.error} />
+      <Field label="Your password" name="password" type="password" autoComplete="current-password" required />
+      <Field
+        label="Code from the new app"
+        name="code"
+        autoComplete="one-time-code"
+        inputMode="numeric"
+        pattern="[0-9 ]*"
+        required
+      />
+      <Submit>Switch apps</Submit>
     </form>
   );
 }

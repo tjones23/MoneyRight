@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { PageBody, SiteHeader } from "@/components/SiteHeader";
+import { describeDevice } from "@/lib/devices";
 import {
   BackupNowForm,
   ChangePasswordForm,
@@ -10,6 +11,10 @@ import {
   RemovePersonForm,
 } from "@/components/SettingsForms";
 import { AddPasskeyForm } from "@/components/PasskeyButtons";
+import { PushDeviceSetup } from "@/components/PushButtons";
+import { listPushDevices } from "@/server/push";
+import { removePushDeviceAction } from "@/app/actions/push";
+import Link from "next/link";
 import { backupDir, backupDirIsLocal, lastBackup, listBackups } from "@/server/backup";
 import { listPasskeys } from "@/server/passkeys";
 import { removePasskeyAction } from "@/app/actions/passkeys";
@@ -38,13 +43,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function describeDevice(userAgent: string | null): string {
-  if (!userAgent) return "Unknown browser";
-  const os = /iPhone|iPad/.test(userAgent) ? "iOS" : /Mac OS X/.test(userAgent) ? "Mac" : /Android/.test(userAgent) ? "Android" : /Windows/.test(userAgent) ? "Windows" : "";
-  const browser = /Edg\//.test(userAgent) ? "Edge" : /Firefox\//.test(userAgent) ? "Firefox" : /Chrome\//.test(userAgent) ? "Chrome" : /Safari\//.test(userAgent) ? "Safari" : "Browser";
-  return os ? `${browser} on ${os}` : browser;
-}
-
 export default async function SettingsPage() {
   const { user, session, request } = await requireUser();
   const { db, secondFactorRequired } = appContext();
@@ -52,6 +50,7 @@ export default async function SettingsPage() {
   const codesLeft = unusedRecoveryCodeCount(db, user.id);
   const events = recentEvents(db, user.id);
   const passkeys = listPasskeys(db, user.id);
+  const pushDevices = listPushDevices(db, user.id);
 
   return (
     <>
@@ -60,6 +59,53 @@ export default async function SettingsPage() {
         <Section title="Password">
           <ChangePasswordForm />
         </Section>
+
+        {secondFactorRequired && (
+          <Section title="Authenticator app">
+            <p className="mb-4 text-sm text-muted">
+              Six-digit codes from Apple Passwords, Google Authenticator or any other authenticator app. Moving to a
+              different app — or a new phone without a backup — takes your password and a code from the new app.
+            </p>
+            <Link
+              href="/settings/authenticator"
+              className="inline-block rounded-full border border-line bg-surface px-4 py-2 text-sm font-medium hover:border-muted-dim"
+            >
+              Switch authenticator app
+            </Link>
+          </Section>
+        )}
+
+        {secondFactorRequired && (
+          <Section title="Approve sign-ins from your phone">
+            <p className="mb-4 text-sm text-muted">
+              After your password, send a notification to your phone and approve it there, by typing the number the
+              sign-in screen shows — no code to copy. Turn it on from the phone itself: on iPhone, from MoneyRight added to
+              the Home Screen. Codes and passkeys keep working.
+            </p>
+            {pushDevices.length > 0 && (
+              <ul className="mb-4 divide-y divide-line-soft text-sm">
+                {pushDevices.map((d) => (
+                  <li key={d.id} className="flex items-center gap-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p>{d.name}</p>
+                      <p className="text-xs text-muted">
+                        added {when.format(d.createdAt)}
+                        {d.lastUsedAt && ` · last approved ${when.format(d.lastUsedAt)}`}
+                      </p>
+                    </div>
+                    <form action={removePushDeviceAction}>
+                      <input type="hidden" name="id" value={d.id} />
+                      <button type="submit" className="rounded-full border border-line px-3 py-1 text-xs hover:border-muted-dim">
+                        Remove
+                      </button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <PushDeviceSetup />
+          </Section>
+        )}
 
         {secondFactorRequired && (
           <Section title="Recovery codes">
@@ -74,7 +120,8 @@ export default async function SettingsPage() {
           <Section title="Passkeys">
             <p className="mb-4 text-sm text-muted">
               Sign in with Face ID, Touch ID or a security key instead of typing a code — still after your password,
-              and your authenticator app keeps working. A passkey works only at the address it was made on; this is{" "}
+              and your authenticator app keeps working. Passkeys saved in Apple Passwords sync to your other Apple
+              devices through iCloud Keychain; Google Password Manager&apos;s sync across Chrome and Android. A passkey works only at the address it was made on; this is{" "}
               <span className="font-mono">{request.relyingParty.id}</span>.
             </p>
             {passkeys.length > 0 && (

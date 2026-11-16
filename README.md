@@ -159,6 +159,32 @@ authenticator app keeps working). A passkey belongs to the address it was
 made on — make it at `https://moneyright.<tailnet>.ts.net`, where you'll
 use it; one made at `localhost` only works there.
 
+**Authenticator apps.** Any app that reads a standard `otpauth://` QR code
+works; the setup page has steps for **Apple Passwords** and **Google
+Authenticator**, and on a phone the code is also a button that opens the
+app directly. In Apple Passwords, save it to the same entry as your
+MoneyRight password and Safari fills the code in at sign-in. To move to a
+different app later, use Settings → Authenticator app → **Switch
+authenticator app** (your password plus the new app's first code; recovery
+codes, passkeys and phones stay).
+
+**Approve sign-ins from your phone.** Settings → Approve sign-ins from your
+phone, opened *on the phone*, turns on push notifications for it — on
+iPhone, first add MoneyRight to the Home Screen (Safari → Share → Add to
+Home Screen) and open it from there, since iOS only delivers web push to
+Home Screen apps. Then, after your password, **Send a request to my phone**:
+tap the notification, type the two-digit number the sign-in screen shows,
+and approve. Requests last two minutes, three wrong numbers deny, and a
+denial shows in Recent activity. Like passkeys it's always after the
+password, and codes keep working.
+
+It's standard Web Push: the server encrypts each request to keys only that
+phone's browser holds and sends it to the browser's push service (Apple's,
+Google's or Mozilla's — the only hosts it will send to), which sees nothing
+but ciphertext. The server needs outbound HTTPS to that service; nothing
+calls in. Push services ask the sender for a contact: by default the site's
+own address, or set `MONEYRIGHT_PUSH_CONTACT` (`mailto:…` or `https://…`).
+
 **Your data.** Settings → Your data: **Download my data** (JSON — accounts,
 every daily balance, loans; no passwords or tokens), **Remove all my
 financial data** (revokes every bank link, keeps the sign-in), and **Delete

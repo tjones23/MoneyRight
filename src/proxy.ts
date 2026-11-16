@@ -17,8 +17,21 @@ import { contentSecurityPolicy, staticSecurityHeaders } from "@/lib/security-hea
 
 const SESSION_COOKIE = "mr_session";
 
-/** Reachable without a session: signing in, first-run setup, invites, icons. */
-const OPEN_PATHS = [/^\/login(\/|$)/, /^\/setup$/, /^\/invite\//, /^\/icon/, /^\/apple-icon/, /^\/manifest/];
+/**
+ * Reachable without a session: signing in, first-run setup, invites, icons,
+ * the service worker, and the phone's page for approving a sign-in (whose
+ * one-time link is its own proof — see server/push.ts).
+ */
+const OPEN_PATHS = [
+  /^\/login(\/|$)/,
+  /^\/setup$/,
+  /^\/invite\//,
+  /^\/approve\/[A-Za-z0-9_-]+$/,
+  /^\/icon/,
+  /^\/apple-icon/,
+  /^\/manifest/,
+  /^\/sw\.js$/,
+];
 
 function makeNonce(): string {
   return Buffer.from(crypto.randomUUID()).toString("base64");

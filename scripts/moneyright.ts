@@ -112,10 +112,11 @@ async function main() {
         db.prepare("UPDATE users SET totp_secret = NULL, totp_last_counter = NULL WHERE id = ?").run(user.id);
         db.prepare("DELETE FROM recovery_codes WHERE user_id = ?").run(user.id);
         db.prepare("DELETE FROM passkeys WHERE user_id = ?").run(user.id);
+        db.prepare("DELETE FROM push_devices WHERE user_id = ?").run(user.id);
         db.prepare("DELETE FROM sessions WHERE user_id = ?").run(user.id);
         logEvent(db, user.id, "authenticator-reset", Date.now(), "from this Mac's terminal");
       });
-      console.log(`✓ ${user.display_name}'s authenticator, recovery codes and passkeys are cleared, and they're signed out.`);
+      console.log(`✓ ${user.display_name}'s authenticator, recovery codes, passkeys and sign-in phones are cleared, and they're signed out.`);
       console.log("  They set up a new authenticator at their next sign-in.");
       return;
     }

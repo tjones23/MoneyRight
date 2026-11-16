@@ -464,7 +464,7 @@ export function checkSecondFactor(ctx: Ctx, userId: number, input: string, now: 
 
 /**
  * An admin clears someone's authenticator — a lost phone, with the recovery
- * codes lost too — and their passkeys with it. They're signed out, and set
+ * codes lost too — and their passkeys and sign-in phones with it. They're signed out, and set
  * one up again at next sign-in.
  */
 export function resetTotp(db: DatabaseSync, adminId: number, userId: number, now: number) {
@@ -474,7 +474,30 @@ export function resetTotp(db: DatabaseSync, adminId: number, userId: number, now
     db.prepare("UPDATE users SET totp_secret = NULL, totp_last_counter = NULL WHERE id = ?").run(userId);
     db.prepare("DELETE FROM recovery_codes WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM passkeys WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM push_devices WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
     logEvent(db, userId, "authenticator-reset", now, `by admin #${adminId}`);
+  });
+}
+
+/**
+ * Moves a signed-in user to a different authenticator app — say, Google
+ * Authenticator to Apple Passwords. The new secret is the session's pending
+ * one (the QR code on the page); it takes the password and the new app's
+ * first code. The old app stops working; recovery codes and passkeys don't
+ * change.
+ */
+export async function changeTotp(ctx: Ctx, session: Session, password: string, code: string, now: number): Promise<void> {
+  const row = userRow(ctx.db, session.userId);
+  if (!row || !(await verifyPassword(password, row.password_hash))) throw new AccountError("Your password isn't right.");
+  const secret = pendingTotpSecret(ctx, session);
+  const counter = verifyTotp(secret, code, now, null);
+  if (counter === null) throw new AccountError("That code doesn't match. Use the current code from the new app.");
+  transaction(ctx.db, () => {
+    ctx.db
+      .prepare("UPDATE users SET totp_secret = ?, totp_last_counter = ? WHERE id = ?")
+      .run(seal(ctx.key, secret, totpContext(session.userId)), counter, session.userId);
+    ctx.db.prepare("UPDATE sessions SET pending_totp_secret = NULL WHERE id_hash = ?").run(session.idHash);
+    logEvent(ctx.db, session.userId, "authenticator-changed", now);
   });
 }
