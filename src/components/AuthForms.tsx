@@ -72,7 +72,8 @@ export function LoginForm() {
   return (
     <form action={action} className="space-y-4">
       <FormMessage error={state.error} />
-      <Field label="Username" name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required />
+      {/* "webauthn" lets the browser list saved passkeys in this field's autofill. */}
+      <Field label="Username" name="username" autoComplete="username webauthn" autoCapitalize="none" spellCheck={false} required />
       <Field label="Password" name="password" type="password" autoComplete="current-password" required />
       <Submit>Continue</Submit>
     </form>

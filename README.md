@@ -153,11 +153,46 @@ npm run moneyright -- reset-password <username>            # forgotten password 
 Add `--dev` to act on the dev server's data instead. These need no sign-in:
 anyone who can run them can already read the data directory.
 
-**Passkeys.** Settings → Passkeys adds Face ID / Touch ID / a security key as
-the second step instead of typing a code (always after the password; the
-authenticator app keeps working). A passkey belongs to the address it was
+**Passkeys.** Settings → Passkeys adds Face ID / Touch ID / a security key —
+saved to Apple Passwords (synced by iCloud Keychain), Google Password
+Manager, or a key you carry. Then sign in with **no username or password**:
+**Sign in with a passkey** on the sign-in page, or pick it from the username
+field's autofill. The passkey alone is enough because it's already two
+factors — the device or keychain holding it, unlocked by Face ID, Touch ID or
+the device passcode (MoneyRight requires that check) — and it can't be
+phished, since the browser offers it only to the address it was made on. The
+password and authenticator app keep working, and a passkey still works as
+the second step after a password. Passkeys added before passwordless sign-in
+existed may not be offered on their own (Apple's and Google's are); remove
+and re-add one if so. A passkey belongs to the address it was
 made on — make it at `https://moneyright.<tailnet>.ts.net`, where you'll
 use it; one made at `localhost` only works there.
+
+**Authenticator apps.** Any app that reads a standard `otpauth://` QR code
+works; the setup page has steps for **Apple Passwords** and **Google
+Authenticator**, and on a phone the code is also a button that opens the
+app directly. In Apple Passwords, save it to the same entry as your
+MoneyRight password and Safari fills the code in at sign-in. To move to a
+different app later, use Settings → Authenticator app → **Switch
+authenticator app** (your password plus the new app's first code; recovery
+codes, passkeys and phones stay).
+
+**Approve sign-ins from your phone.** Settings → Approve sign-ins from your
+phone, opened *on the phone*, turns on push notifications for it — on
+iPhone, first add MoneyRight to the Home Screen (Safari → Share → Add to
+Home Screen) and open it from there, since iOS only delivers web push to
+Home Screen apps. Then, after your password, **Send a request to my phone**:
+tap the notification, type the two-digit number the sign-in screen shows,
+and approve. Requests last two minutes, three wrong numbers deny, and a
+denial shows in Recent activity. Like passkeys it's always after the
+password, and codes keep working.
+
+It's standard Web Push: the server encrypts each request to keys only that
+phone's browser holds and sends it to the browser's push service (Apple's,
+Google's or Mozilla's — the only hosts it will send to), which sees nothing
+but ciphertext. The server needs outbound HTTPS to that service; nothing
+calls in. Push services ask the sender for a contact: by default the site's
+own address, or set `MONEYRIGHT_PUSH_CONTACT` (`mailto:…` or `https://…`).
 
 **Your data.** Settings → Your data: **Download my data** (JSON — accounts,
 every daily balance, loans; no passwords or tokens), **Remove all my

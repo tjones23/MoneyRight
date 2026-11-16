@@ -6,6 +6,7 @@ import { forecastSettings, listGoals } from "./planning";
 import { listTransactions } from "./transactions";
 import { pruneHomeIndex } from "./home-index";
 import { listPasskeys } from "./passkeys";
+import { listPushDevices } from "./push";
 import { revokeConnection, type Providers } from "./sync";
 import { verifyPassword } from "@/lib/password";
 import { todayKey } from "@/lib/local-date";
@@ -92,6 +93,7 @@ export function exportUserData(ctx: Ctx, userId: number) {
       targetDate: g.targetDate,
     })),
     passkeys: listPasskeys(ctx.db, userId).map((p) => ({ name: p.name, host: p.rpId, addedAt: new Date(p.createdAt).toISOString() })),
+    signInPhones: listPushDevices(ctx.db, userId).map((d) => ({ name: d.name, addedAt: new Date(d.createdAt).toISOString() })),
     securityEvents: recentEvents(ctx.db, userId, 1000).map((e) => ({ at: new Date(e.at).toISOString(), event: e.event, detail: e.detail })),
   };
 }

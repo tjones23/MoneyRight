@@ -1,20 +1,17 @@
 import type { Metadata } from "next";
-import QRCode from "qrcode";
 import { AuthShell } from "@/components/AuthShell";
 import { EnrollForm, FinishEnrollForm } from "@/components/AuthForms";
 import { requireStage } from "@/server/auth";
 import { appContext } from "@/server/context";
 import { enrollmentRecoveryCodes, pendingTotpSecret } from "@/server/accounts";
 import { RecoveryCodes } from "@/components/ui/forms";
-import { base32Encode } from "@/lib/base32";
-import { otpauthUri } from "@/lib/totp";
+import { TotpSetup } from "@/components/TotpSetup";
 
 export const metadata: Metadata = { title: "Set up your authenticator" };
 
 /**
- * Every account needs a second factor before it sees anything. The QR code
- * is drawn here on the server, so the secret never passes through any
- * third-party service.
+ * Every account needs a second factor before it sees anything: an
+ * authenticator app, set up from TotpSetup's QR code or link.
  */
 export default async function EnrollPage() {
   const { session, user } = await requireStage("enroll");
@@ -37,22 +34,14 @@ export default async function EnrollPage() {
     );
   }
   const secret = pendingTotpSecret(appContext(), session);
-  const uri = otpauthUri(secret, user.username);
-  const qr = await QRCode.toDataURL(uri, { margin: 1, width: 220, errorCorrectionLevel: "M" });
-  const typed = base32Encode(secret).match(/.{1,4}/g)!.join(" ");
 
   return (
     <AuthShell
       title="Set up your authenticator"
-      subtitle="Scan this with an authenticator app — Apple Passwords, 1Password, Google Authenticator, Authy — then enter the code it shows."
+      subtitle="Add MoneyRight to an authenticator app — Apple Passwords, Google Authenticator, 1Password, Authy — then enter the code it shows."
     >
       <div className="space-y-5">
-        {/* eslint-disable-next-line @next/next/no-img-element -- a data: URI, nothing to optimize */}
-        <img src={qr} alt="QR code for your authenticator app" width={220} height={220} className="mx-auto rounded-lg bg-white" />
-        <details className="text-sm text-muted">
-          <summary className="cursor-pointer">Can&apos;t scan? Enter this key instead</summary>
-          <p className="mt-2 break-all font-mono text-text">{typed}</p>
-        </details>
+        <TotpSetup secret={secret} account={user.username} />
         <EnrollForm />
       </div>
     </AuthShell>

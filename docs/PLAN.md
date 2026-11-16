@@ -50,7 +50,6 @@ change, an extra payment) re-anchors the schedule from that date.
    moneyright` for backup / restore / reset-2fa / reset-password on this
    Mac; export, remove-financial-data, delete-account and remove-person;
    passkeys as an alternative second step.
-
 5. **Assets — done.** Homes, vehicles and other things owned, as accounts
    of kind property / vehicle / other: a value as of a date, then held,
    depreciated yearly, or (homes) moved by the ZIP code's Zillow Home Value
@@ -74,6 +73,14 @@ change, an extra payment) re-anchors the schedule from that date.
      savings — the last six whole months' average, or a set amount — add
      up. Goals for net worth or any one account (a debt counts down), with
      an optional date and an on-track check.
+7. **More ways to give the second step — done.** Approving a sign-in from a
+   phone by Web Push (RFC 8291/8292, hand-rolled like TOTP; number matching;
+   two-minute, single-use links encrypted to the phone), setup steps for
+   Apple Passwords and Google Authenticator with an `otpauth://` link for
+   phones, and switching authenticator apps from Settings.
+8. **Passwordless passkeys — done.** "Sign in with a passkey" on the
+   sign-in page and passkey autofill in the username field; the challenge
+   waits in its own table, as there's no session yet.
 
 ## Asset valuation sources (reviewed November 2026)
 
@@ -99,8 +106,11 @@ change, an extra payment) re-anchors the schedule from that date.
 
 ## Decisions made along the way
 
-- Every account has TOTP; passkeys are an optional alternative for the
-  second step, never a replacement for the password.
+- Every account has TOTP; phone approvals are an optional alternative for
+  the second step, never a replacement for the password.
+- A passkey can sign in on its own, with no username or password (changed
+  from second-step-only): user verification is required, so it's both
+  factors, and it's phishing-resistant. New passkeys are made discoverable.
 - No ORM: `node:sqlite` with hand-written SQL and numbered migrations.
 - Dev and production keep separate data directories.
 - The dev server skips the authenticator, but only on a database the dev

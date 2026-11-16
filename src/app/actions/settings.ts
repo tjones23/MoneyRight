@@ -6,6 +6,7 @@ import { appContext, ensureSetupCode, hasUsers } from "@/server/context";
 import {
   AccountError,
   changePassword,
+  changeTotp,
   createInvite,
   regenerateRecoveryCodes,
   resetTotp,
@@ -13,7 +14,7 @@ import {
   revokeOtherSessions,
   revokeSession,
 } from "@/server/accounts";
-import { clearSessionCookie, requireAdmin, requireUser } from "@/server/auth";
+import { allowAttempt, clearSessionCookie, requireAdmin, requireUser } from "@/server/auth";
 import { makeBackup, recordBackupError } from "@/server/backup";
 import { deleteFinancialData, deleteOwnAccount, removePerson } from "@/server/my-data";
 import { providers } from "@/server/providers";
@@ -49,6 +50,15 @@ export async function changePasswordAction(_prev: SettingsState, form: FormData)
   return guarded(async () => {
     await changePassword(appContext().db, user.id, field(form, "current"), field(form, "next"), session.idHash, Date.now());
     return { done: "Password changed. Every other session was signed out." };
+  });
+}
+
+export async function changeAuthenticatorAction(_prev: SettingsState, form: FormData): Promise<SettingsState> {
+  const { user, session, request } = await requireUser();
+  if (!allowAttempt("enroll", user.username, request)) return { error: "Too many tries. Wait 15 minutes and try again." };
+  return guarded(async () => {
+    await changeTotp(appContext(), session, field(form, "password"), field(form, "code"), Date.now());
+    return { done: "Done — sign in with codes from the new app from now on. You can delete MoneyRight from the old one." };
   });
 }
 
