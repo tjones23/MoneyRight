@@ -153,9 +153,18 @@ npm run moneyright -- reset-password <username>            # forgotten password 
 Add `--dev` to act on the dev server's data instead. These need no sign-in:
 anyone who can run them can already read the data directory.
 
-**Passkeys.** Settings → Passkeys adds Face ID / Touch ID / a security key as
-the second step instead of typing a code (always after the password; the
-authenticator app keeps working). A passkey belongs to the address it was
+**Passkeys.** Settings → Passkeys adds Face ID / Touch ID / a security key —
+saved to Apple Passwords (synced by iCloud Keychain), Google Password
+Manager, or a key you carry. Then sign in with **no username or password**:
+**Sign in with a passkey** on the sign-in page, or pick it from the username
+field's autofill. The passkey alone is enough because it's already two
+factors — the device or keychain holding it, unlocked by Face ID, Touch ID or
+the device passcode (MoneyRight requires that check) — and it can't be
+phished, since the browser offers it only to the address it was made on. The
+password and authenticator app keep working, and a passkey still works as
+the second step after a password. Passkeys added before passwordless sign-in
+existed may not be offered on their own (Apple's and Google's are); remove
+and re-add one if so. A passkey belongs to the address it was
 made on — make it at `https://moneyright.<tailnet>.ts.net`, where you'll
 use it; one made at `localhost` only works there.
 

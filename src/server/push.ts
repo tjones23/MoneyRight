@@ -30,7 +30,7 @@ import {
  * in, so a stray request — someone else with your password — can't be
  * approved by reflex. Requests last two minutes; three wrong numbers deny.
  *
- * Like passkeys, always after the password; the authenticator app and
+ * Always after the password; the authenticator app and
  * recovery codes keep working.
  */
 

@@ -1,14 +1,16 @@
 import { createHash, generateKeyPairSync, randomBytes, sign, type KeyObject } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDatabase } from "./db";
-import { createFirstAdmin, createSession, findSession, type Session, type User } from "./accounts";
+import { createSession, findSession, type Session, type User } from "./accounts";
 import {
   finishAuthentication,
   finishRegistration,
   hasPasskeyFor,
   listPasskeys,
+  finishPasskeySignIn,
   removePasskey,
   startAuthentication,
+  startPasskeySignIn,
   startRegistration,
 } from "./passkeys";
 import type { DatabaseSync } from "node:sqlite";
@@ -83,7 +85,7 @@ class SoftAuthenticator {
     };
   }
 
-  authenticate(options: { challenge: string }, rp: { id: string; origin: string }) {
+  authenticate(options: { challenge: string }, rp: { id: string; origin: string }, userHandle?: string) {
     const clientData = Buffer.from(JSON.stringify({ type: "webauthn.get", challenge: options.challenge, origin: rp.origin, crossOrigin: false }));
     const authenticatorData = this.authData(rp.id, false);
     const signature = sign("sha256", Buffer.concat([authenticatorData, createHash("sha256").update(clientData).digest()]), this.key);
@@ -92,7 +94,12 @@ class SoftAuthenticator {
       rawId: b64url(this.credentialId),
       type: "public-key" as const,
       clientExtensionResults: {},
-      response: { clientDataJSON: b64url(clientData), authenticatorData: b64url(authenticatorData), signature: b64url(signature) },
+      response: {
+        clientDataJSON: b64url(clientData),
+        authenticatorData: b64url(authenticatorData),
+        signature: b64url(signature),
+        ...(userHandle ? { userHandle: b64url(userHandle) } : {}),
+      },
     };
   }
 }
@@ -105,7 +112,12 @@ let full: Session;
 
 beforeEach(async () => {
   db = openDatabase(":memory:");
-  const id = await createFirstAdmin(db, { username: "alex", displayName: "Alex", password: "a long enough password" }, T0);
+  // Inserted directly: passwords don't matter here, and this needs no argon2.
+  const id = Number(
+    db
+      .prepare("INSERT INTO users (username, display_name, password_hash, is_admin, created_at, password_changed_at) VALUES ('alex', 'Alex', 'x', 1, ?, ?)")
+      .run(T0, T0).lastInsertRowid,
+  );
   const token = createSession(db, id, "full", { userAgent: null, tailnetLogin: null }, T0);
   ({ session: full, user } = findSession(db, token, null, T0)!);
 });
@@ -175,3 +187,55 @@ describe("passkeys, end to end", () => {
   });
 });
 
+
+describe("signing in with a passkey alone", () => {
+  it("finds the account from the passkey, with no username", async () => {
+    const device = await enrolled();
+    const { options, challengeId } = await startPasskeySignIn(db, rp, T0);
+    expect(options.allowCredentials ?? []).toEqual([]);
+    expect(options.userVerification).toBe("required");
+    const assertion = device.authenticate(options, rp, `moneyright-user-${user.id}`);
+    expect(await finishPasskeySignIn(db, challengeId, assertion as never, rp, T0 + 1000)).toBe(user.id);
+    expect(listPasskeys(db, user.id)[0].lastUsedAt).toBe(T0 + 1000);
+  });
+
+  it("spends the challenge on the first try", async () => {
+    const device = await enrolled();
+    const { options, challengeId } = await startPasskeySignIn(db, rp, T0);
+    const assertion = device.authenticate(options, rp);
+    expect(await finishPasskeySignIn(db, challengeId, assertion as never, rp, T0)).toBe(user.id);
+    expect(await finishPasskeySignIn(db, challengeId, assertion as never, rp, T0)).toBeNull();
+  });
+
+  it("refuses an expired challenge, another host's, or a made-up one", async () => {
+    const device = await enrolled();
+    let { options, challengeId } = await startPasskeySignIn(db, rp, T0);
+    expect(await finishPasskeySignIn(db, challengeId, device.authenticate(options, rp) as never, rp, T0 + 5 * 60_000 + 1)).toBeNull();
+
+    ({ options, challengeId } = await startPasskeySignIn(db, rp, T0));
+    const other = { id: "moneyright.example.ts.net", origin: "https://moneyright.example.ts.net" };
+    expect(await finishPasskeySignIn(db, challengeId, device.authenticate(options, other) as never, other, T0)).toBeNull();
+
+    ({ options } = await startPasskeySignIn(db, rp, T0));
+    expect(await finishPasskeySignIn(db, "made-up", device.authenticate(options, rp) as never, rp, T0)).toBeNull();
+  });
+
+  it("refuses an unknown passkey, a phishing origin, and a user handle for someone else", async () => {
+    const device = await enrolled();
+    let { options, challengeId } = await startPasskeySignIn(db, rp, T0);
+    expect(await finishPasskeySignIn(db, challengeId, new SoftAuthenticator().authenticate(options, rp) as never, rp, T0)).toBeNull();
+
+    ({ options, challengeId } = await startPasskeySignIn(db, rp, T0));
+    const phished = device.authenticate(options, { id: "localhost", origin: "https://evil.example" });
+    expect(await finishPasskeySignIn(db, challengeId, phished as never, rp, T0)).toBeNull();
+
+    ({ options, challengeId } = await startPasskeySignIn(db, rp, T0));
+    const wrongHandle = device.authenticate(options, rp, "moneyright-user-999");
+    expect(await finishPasskeySignIn(db, challengeId, wrongHandle as never, rp, T0)).toBeNull();
+  });
+
+  it("asks new passkeys to be discoverable, so they can sign in alone", async () => {
+    const options = await startRegistration(db, full, user, rp, T0);
+    expect(options.authenticatorSelection?.residentKey).toBe("required");
+  });
+});

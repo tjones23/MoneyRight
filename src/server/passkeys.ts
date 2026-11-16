@@ -7,11 +7,20 @@ import {
 } from "@simplewebauthn/server";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
 import { AccountError, logEvent, type Session, type User } from "./accounts";
+import { hashToken, newToken } from "@/lib/tokens";
 
 /**
- * Passkeys (WebAuthn), as the second factor in place of a six-digit code.
- * Always after the password, never instead of it; the authenticator app
- * stays as the fallback, so losing a passkey never locks anyone out.
+ * Passkeys (WebAuthn). Two ways to use one:
+ *
+ * - **On its own**, from the sign-in page: no username, no password. A
+ *   passkey is something you have (the device or synced keychain) unlocked
+ *   by something you are or know (Face ID, Touch ID, the device passcode) —
+ *   user verification is required, so it's both factors at once, and it
+ *   can't be phished: the browser only offers it to the host it was made on.
+ * - **As the second step** after a password, in place of a six-digit code.
+ *
+ * The authenticator app stays as the fallback either way, so losing a
+ * passkey never locks anyone out.
  *
  * A passkey belongs to the host it was made on (the relying party ID):
  * one made at moneyright.<tailnet>.ts.net doesn't work at localhost, and
@@ -37,6 +46,11 @@ export interface Passkey {
 }
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
+
+/** The WebAuthn user handle: stable per account, and not the username, which could change. */
+function userHandle(userId: number): string {
+  return `moneyright-user-${userId}`;
+}
 
 export function listPasskeys(db: DatabaseSync, userId: number): Passkey[] {
   return db
@@ -96,10 +110,11 @@ export async function startRegistration(db: DatabaseSync, session: Session, user
     userName: user.username,
     userDisplayName: user.displayName,
     // Stable per account, and not the username, which could change.
-    userID: new TextEncoder().encode(`moneyright-user-${user.id}`),
+    userID: new TextEncoder().encode(userHandle(user.id)),
     attestationType: "none",
     excludeCredentials: credentialsFor(db, user.id, rp.id).map((c) => ({ id: c.id, transports: c.transports })),
-    authenticatorSelection: { residentKey: "preferred", userVerification: "required" },
+    // Discoverable, so it can sign in on its own, without a username first.
+    authenticatorSelection: { residentKey: "required", userVerification: "required" },
   });
   storeChallenge(db, session, options.challenge, now);
   return options;
@@ -150,7 +165,7 @@ export async function finishRegistration(
 }
 
 // ---------------------------------------------------------------------------
-// Using one (at sign-in, after the password)
+// Using one as the second step (at sign-in, after the password)
 // ---------------------------------------------------------------------------
 
 export async function startAuthentication(db: DatabaseSync, session: Session, rp: RelyingParty, now: number) {
@@ -175,7 +190,19 @@ export async function finishAuthentication(
 ): Promise<boolean> {
   const challenge = takeChallenge(db, session, now);
   if (!challenge) return false;
-  const credential = credentialsFor(db, session.userId, rp.id).find((c) => c.id === response.id);
+  return verifyAssertion(db, session.userId, challenge, response, rp, now);
+}
+
+/** Checks an assertion against one user's passkeys for this host, and records its use. */
+async function verifyAssertion(
+  db: DatabaseSync,
+  userId: number,
+  challenge: string,
+  response: AuthenticationResponseJSON,
+  rp: RelyingParty,
+  now: number,
+): Promise<boolean> {
+  const credential = credentialsFor(db, userId, rp.id).find((c) => c.id === response.id);
   if (!credential) return false;
   try {
     const { verified, authenticationInfo } = await verifyAuthenticationResponse({
@@ -191,12 +218,63 @@ export async function finishAuthentication(
       authenticationInfo.newCounter,
       now,
       credential.id,
-      session.userId,
+      userId,
     );
     return true;
   } catch {
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Signing in with a passkey alone (no username, no password)
+// ---------------------------------------------------------------------------
+
+/**
+ * A challenge for whichever passkey the browser offers. There's no session
+ * yet, so it's kept under a random id the browser holds until it answers.
+ */
+export async function startPasskeySignIn(db: DatabaseSync, rp: RelyingParty, now: number) {
+  db.prepare("DELETE FROM passkey_challenges WHERE created_at < ?").run(now - CHALLENGE_TTL_MS);
+  // No allowCredentials: the browser lists every passkey it has for this host.
+  const options = await generateAuthenticationOptions({ rpID: rp.id, userVerification: "required" });
+  const challengeId = newToken();
+  db.prepare("INSERT INTO passkey_challenges (id_hash, challenge, rp_id, created_at) VALUES (?, ?, ?, ?)").run(
+    hashToken(challengeId),
+    options.challenge,
+    rp.id,
+    now,
+  );
+  return { options, challengeId };
+}
+
+/**
+ * The user a passkey signed in, or null. The challenge is spent by the first
+ * attempt, and must have been issued for this same host.
+ */
+export async function finishPasskeySignIn(
+  db: DatabaseSync,
+  challengeId: string,
+  response: AuthenticationResponseJSON,
+  rp: RelyingParty,
+  now: number,
+): Promise<number | null> {
+  const idHash = hashToken(String(challengeId));
+  const row = db.prepare("SELECT challenge, rp_id, created_at FROM passkey_challenges WHERE id_hash = ?").get(idHash) as
+    | { challenge: string; rp_id: string; created_at: number }
+    | undefined;
+  db.prepare("DELETE FROM passkey_challenges WHERE id_hash = ?").run(idHash);
+  if (!row || row.rp_id !== rp.id || now - row.created_at > CHALLENGE_TTL_MS) return null;
+
+  const owner = db
+    .prepare("SELECT user_id FROM passkeys WHERE credential_id = ? AND rp_id = ?")
+    .get(String(response?.id ?? ""), rp.id) as { user_id: number } | undefined;
+  if (!owner) return null;
+  // The passkey names its account too; it must be the one the credential belongs to.
+  const handle = response.response?.userHandle;
+  if (handle && Buffer.from(handle, "base64url").toString() !== userHandle(owner.user_id)) return null;
+
+  return (await verifyAssertion(db, owner.user_id, row.challenge, response, rp, now)) ? owner.user_id : null;
 }
 
 export function removePasskey(db: DatabaseSync, userId: number, id: number, now: number) {

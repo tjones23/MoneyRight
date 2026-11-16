@@ -119,9 +119,11 @@ export default async function SettingsPage() {
         {secondFactorRequired && (
           <Section title="Passkeys">
             <p className="mb-4 text-sm text-muted">
-              Sign in with Face ID, Touch ID or a security key instead of typing a code — still after your password,
-              and your authenticator app keeps working. Passkeys saved in Apple Passwords sync to your other Apple
-              devices through iCloud Keychain; Google Password Manager&apos;s sync across Chrome and Android. A passkey works only at the address it was made on; this is{" "}
+              Sign in with Face ID, Touch ID or a security key — no username or password: choose{" "}
+              <strong>Sign in with a passkey</strong>, or pick it from the username field&apos;s autofill. Your password and
+              authenticator app keep working. Passkeys saved in Apple Passwords sync to your other Apple
+              devices through iCloud Keychain; Google Password Manager&apos;s sync across Chrome and Android. A passkey added before passwordless sign-in may not be offered on its own — remove it and add it again.
+              A passkey works only at the address it was made on; this is{" "}
               <span className="font-mono">{request.relyingParty.id}</span>.
             </p>
             {passkeys.length > 0 && (

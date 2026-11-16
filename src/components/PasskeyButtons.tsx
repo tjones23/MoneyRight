@@ -1,9 +1,17 @@
 "use client";
 
-import { useState, useSyncExternalStore, useTransition } from "react";
-import { browserSupportsWebAuthn, startAuthentication, startRegistration } from "@simplewebauthn/browser";
+import { useEffect, useState, useSyncExternalStore, useTransition } from "react";
+import {
+  browserSupportsWebAuthn,
+  browserSupportsWebAuthnAutofill,
+  startAuthentication,
+  startRegistration,
+} from "@simplewebauthn/browser";
+import type { AuthenticationResponseJSON } from "@simplewebauthn/browser";
 import {
   addPasskeyAction,
+  passkeyLoginAction,
+  passkeyLoginOptionsAction,
   passkeyRegistrationOptionsAction,
   passkeySignInAction,
   passkeySignInOptionsAction,
@@ -15,6 +23,10 @@ const noop = () => () => {};
 
 function cancelled(error: unknown) {
   return error instanceof Error && (error.name === "NotAllowedError" || error.name === "AbortError");
+}
+
+function isRedirect(error: unknown) {
+  return error instanceof Error && error.message === "NEXT_REDIRECT";
 }
 
 export function AddPasskeyForm() {
@@ -99,6 +111,70 @@ export function PasskeySignInButton() {
         className="w-full rounded-full border border-line bg-surface px-4 py-2 text-sm font-medium hover:border-muted-dim disabled:opacity-60"
       >
         {pending ? "Waiting for your passkey…" : "Use a passkey"}
+      </button>
+      {error && <p className="text-sm text-danger">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * The sign-in page's passkey route: no username or password. The button asks
+ * for any passkey for this address; meanwhile, where the browser supports it,
+ * the username field offers saved passkeys in its autofill list (Safari with
+ * Apple Passwords, Chrome with Google Password Manager). Whichever is used,
+ * the server checks it and signs in — the action redirects on success.
+ */
+export function PasskeyLoginButton() {
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const supported = useSyncExternalStore(noop, browserSupportsWebAuthn, () => false);
+
+  async function finish(challengeId: string, response: AuthenticationResponseJSON) {
+    const result = await passkeyLoginAction(challengeId, response);
+    if (result && !result.ok) setError(result.error);
+  }
+
+  // Autofill: armed once on load; the button below cancels it if pressed.
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      if (!(await browserSupportsWebAuthnAutofill())) return;
+      const { options, challengeId } = await passkeyLoginOptionsAction();
+      if (!live) return;
+      const response = await startAuthentication({ optionsJSON: options, useBrowserAutofill: true });
+      startTransition(() => finish(challengeId, response));
+    })().catch(() => {
+      // Cancelled by the button, or no username field: nothing to say.
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (!supported) return null;
+
+  function signIn() {
+    setError(null);
+    startTransition(async () => {
+      try {
+        const { options, challengeId } = await passkeyLoginOptionsAction();
+        await finish(challengeId, await startAuthentication({ optionsJSON: options }));
+      } catch (e) {
+        if (isRedirect(e)) throw e;
+        setError(cancelled(e) ? "Cancelled." : "That passkey didn't work. Try again, or use your password.");
+      }
+    });
+  }
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={signIn}
+        disabled={pending}
+        className="w-full rounded-full border border-line bg-surface px-4 py-2 text-sm font-medium hover:border-muted-dim disabled:opacity-60"
+      >
+        {pending ? "Waiting for your passkey…" : "Sign in with a passkey"}
       </button>
       {error && <p className="text-sm text-danger">{error}</p>}
     </div>

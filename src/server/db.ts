@@ -309,6 +309,16 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX push_approval_links_approval ON push_approval_links(approval_id);
   `,
+  // 10: signing in with a passkey alone, before there's any session to hold the challenge.
+  `
+  CREATE TABLE passkey_challenges (
+    -- SHA-256 of the random id the browser holds while the passkey prompt is up.
+    id_hash TEXT PRIMARY KEY,
+    challenge TEXT NOT NULL,
+    rp_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDatabase(path: string): DatabaseSync {
