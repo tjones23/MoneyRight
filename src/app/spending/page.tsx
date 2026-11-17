@@ -12,8 +12,8 @@ import {
   isTransfer,
   monthlyFlow,
   monthsEnding,
+  outsideTransfers,
   periodsEnding,
-  receivedTransfers,
   recurringCharges,
   type IncomeGrouping,
   type IncomePeriod,
@@ -145,17 +145,17 @@ export default async function SpendingPage({ searchParams }: PageProps<"/spendin
   const status = transactionsStatus(db, user.id);
   // All of it — Plaid keeps two years — for income by quarter and year; the rest looks back about a year.
   const history = listTransactions(db, user.id);
-  const received = receivedTransfers(history);
+  const outside = outsideTransfers(history);
   const since = addDays(today, -400);
   const txns = history.filter((t) => t.day >= since);
-  const flows = monthlyFlow(txns, months, received);
+  const flows = monthlyFlow(txns, months, outside);
   const flow = flows.find((f) => f.month === month)!;
-  const recurring = recurringCharges(txns, today);
+  const recurring = recurringCharges(txns, today, outside);
   const monthTxns = txns.filter((t) => t.day.startsWith(month));
   const busiest = Math.max(1, ...flows.map((f) => Math.max(f.incomeCents, f.spendingCents)));
   const biggest = Math.max(1, ...flow.byCategory.map((c) => c.cents));
 
-  const income = incomeBySource(history, periodsEnding(today, interval.value, interval.count), today, { by, received });
+  const income = incomeBySource(history, periodsEnding(today, interval.value, interval.count), today, { by, outside });
   const chartPeriods = income.periods.map((p) => describePeriod(p, interval.value, history.at(-1)?.day));
   /** This page with one choice changed and the others kept. */
   const hrefWith = (change: { month?: string; income?: Interval; by?: IncomeGrouping }) => {
@@ -174,7 +174,7 @@ export default async function SpendingPage({ searchParams }: PageProps<"/spendin
       <SiteHeader user={user} />
       <PageBody
         title="Spending"
-        subtitle="From your linked bank and card transactions. Transfers between your own accounts and card payments aren't counted — the card's purchases are. Money sent to you, like Venmo, Zelle or a Stripe payout, counts as money in."
+        subtitle="From your linked bank and card transactions. Transfers between your own accounts and card payments aren't counted — the card's purchases are. Money to or from someone else, like Venmo, Zelle or a Stripe payout, counts as money in or spending."
       >
         {status.connections === 0 ? (
           <section className="rounded-2xl border border-dashed border-line p-6 text-sm text-muted">
@@ -377,7 +377,7 @@ export default async function SpendingPage({ searchParams }: PageProps<"/spendin
               ) : (
                 <ul className="divide-y divide-line-soft text-sm">
                   {monthTxns.map((t) => {
-                    const moved = isTransfer(t) && !received.has(t);
+                    const moved = isTransfer(t) && !outside.has(t);
                     return (
                       <li key={t.id} className="flex items-center gap-3 py-2">
                         <div className="min-w-0 flex-1">
@@ -385,7 +385,7 @@ export default async function SpendingPage({ searchParams }: PageProps<"/spendin
                           <p className="text-xs text-muted">
                             {dayFormat.format(utc(t.day))} · {t.accountName} · {categoryLabel(t.category ?? "OTHER")}
                             {moved && " · transfer, not counted"}
-                            {received.has(t) && " · received, counted as money in"}
+                            {outside.has(t) && (t.amountCents < 0 ? " · received, counted as money in" : " · sent, counted as spending")}
                             {t.pending && " · pending"}
                           </p>
                         </div>
