@@ -3,6 +3,7 @@
 import { useState, type KeyboardEvent } from "react";
 import { niceTicks } from "@/lib/history";
 import { formatCents } from "@/lib/money";
+import { seriesColor } from "@/lib/series-color";
 
 /**
  * Money in per period as stacked columns, a segment per source. Columns are
@@ -32,12 +33,7 @@ export interface IncomeChartPeriod {
   empty: boolean;
 }
 
-const SERIES = 6;
 const compact = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 });
-
-export function seriesColor(slot: number): string {
-  return slot < 0 || slot >= SERIES ? "var(--series-other)" : `var(--series-${slot + 1})`;
-}
 
 /** Bottom of the stack first: in color order, so neighbours are the pairs the palette was checked for. */
 function stackOrder(sources: IncomeChartSource[]): IncomeChartSource[] {
