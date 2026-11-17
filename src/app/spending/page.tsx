@@ -4,7 +4,7 @@ import { PageBody, SiteHeader } from "@/components/SiteHeader";
 import { requireUser } from "@/server/auth";
 import { appContext } from "@/server/context";
 import { listTransactions, transactionsStatus } from "@/server/transactions";
-import { categoryLabel, isTransfer, monthlyFlow, monthsEnding, recurringCharges } from "@/lib/cash-flow";
+import { categoryLabel, isTransfer, monthlyFlow, monthsEnding, receivedTransfers, recurringCharges } from "@/lib/cash-flow";
 import { addDays, todayKey } from "@/lib/local-date";
 import { formatCents, formatChange } from "@/lib/money";
 
@@ -49,7 +49,8 @@ export default async function SpendingPage({ searchParams }: PageProps<"/spendin
 
   const status = transactionsStatus(db, user.id);
   const txns = listTransactions(db, user.id, { from: addDays(today, -400) });
-  const flows = monthlyFlow(txns, months);
+  const received = receivedTransfers(txns);
+  const flows = monthlyFlow(txns, months, received);
   const flow = flows.find((f) => f.month === month)!;
   const recurring = recurringCharges(txns, today);
   const monthTxns = txns.filter((t) => t.day.startsWith(month));
@@ -61,7 +62,7 @@ export default async function SpendingPage({ searchParams }: PageProps<"/spendin
       <SiteHeader user={user} />
       <PageBody
         title="Spending"
-        subtitle="From your linked bank and card transactions. Transfers between your own accounts and card payments aren't counted — the card's purchases are."
+        subtitle="From your linked bank and card transactions. Transfers between your own accounts and card payments aren't counted — the card's purchases are. Money sent to you, like Venmo, Zelle or a Stripe payout, counts as money in."
       >
         {status.connections === 0 ? (
           <section className="rounded-2xl border border-dashed border-line p-6 text-sm text-muted">
@@ -183,20 +184,24 @@ export default async function SpendingPage({ searchParams }: PageProps<"/spendin
                 <p className="text-sm text-muted">None.</p>
               ) : (
                 <ul className="divide-y divide-line-soft text-sm">
-                  {monthTxns.map((t) => (
-                    <li key={t.id} className="flex items-center gap-3 py-2">
-                      <div className="min-w-0 flex-1">
-                        <p className={`truncate ${isTransfer(t) ? "text-muted" : ""}`}>{t.merchant || t.name}</p>
-                        <p className="text-xs text-muted">
-                          {dayFormat.format(utc(t.day))} · {t.accountName} · {categoryLabel(t.category ?? "OTHER")}
-                          {isTransfer(t) && " · transfer, not counted"}
-                          {t.pending && " · pending"}
-                        </p>
-                      </div>
-                      {/* Shown the way a statement reads: money in positive. */}
-                      <span className={`tabular-nums ${t.amountCents < 0 ? "text-good" : ""}`}>{formatChange(-t.amountCents)}</span>
-                    </li>
-                  ))}
+                  {monthTxns.map((t) => {
+                    const moved = isTransfer(t) && !received.has(t);
+                    return (
+                      <li key={t.id} className="flex items-center gap-3 py-2">
+                        <div className="min-w-0 flex-1">
+                          <p className={`truncate ${moved ? "text-muted" : ""}`}>{t.merchant || t.name}</p>
+                          <p className="text-xs text-muted">
+                            {dayFormat.format(utc(t.day))} · {t.accountName} · {categoryLabel(t.category ?? "OTHER")}
+                            {moved && " · transfer, not counted"}
+                            {received.has(t) && " · received, counted as money in"}
+                            {t.pending && " · pending"}
+                          </p>
+                        </div>
+                        {/* Shown the way a statement reads: money in positive. */}
+                        <span className={`tabular-nums ${t.amountCents < 0 ? "text-good" : ""}`}>{formatChange(-t.amountCents)}</span>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </Section>
