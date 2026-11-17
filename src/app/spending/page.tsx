@@ -4,7 +4,21 @@ import { PageBody, SiteHeader } from "@/components/SiteHeader";
 import { requireUser } from "@/server/auth";
 import { appContext } from "@/server/context";
 import { listTransactions, transactionsStatus } from "@/server/transactions";
-import { categoryLabel, isTransfer, monthlyFlow, monthsEnding, outsideTransfers, recurringCharges } from "@/lib/cash-flow";
+import { IncomeChart, IncomeLegend, seriesColor, type IncomeChartPeriod } from "@/components/IncomeChart";
+import {
+  INTERVALS,
+  categoryLabel,
+  incomeBySource,
+  isTransfer,
+  monthlyFlow,
+  monthsEnding,
+  outsideTransfers,
+  periodsEnding,
+  recurringCharges,
+  type IncomeGrouping,
+  type IncomePeriod,
+  type Interval,
+} from "@/lib/cash-flow";
 import { addDays, todayKey } from "@/lib/local-date";
 import { formatCents, formatChange } from "@/lib/money";
 
@@ -38,24 +52,122 @@ function Bar({ share }: { share: number }) {
   );
 }
 
+const weekFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const weekLong = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+const monthOnly = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" });
+
+/** A period's labels for the income chart, and why it isn't whole if it isn't. */
+function describePeriod(p: IncomePeriod, interval: Interval, first: string | undefined): IncomeChartPeriod {
+  const start = utc(p.start);
+  const yy = `'${p.start.slice(2, 4)}`;
+  const quarter = `Q${p.key.slice(-1)}`;
+  const [short, long] =
+    interval === "week"
+      ? [weekFormat.format(start), `Week of ${weekLong.format(start)}`]
+      : interval === "month"
+        ? [p.start.slice(5, 7) === "01" ? `Jan ${yy}` : monthOnly.format(start), monthFormat.format(start)]
+        : interval === "quarter"
+          ? [`${quarter} ${yy}`, `${quarter} ${p.start.slice(0, 4)} (${monthOnly.format(start)}–${monthOnly.format(utc(p.end))})`]
+          : [p.key, p.key];
+  const note = p.empty ? undefined : p.current ? "so far" : p.partial && first ? `from ${dayFormat.format(utc(first))}` : undefined;
+  return { key: p.key, short, long, bySource: p.bySource, totalCents: p.totalCents, note, empty: p.empty };
+}
+
+/** A row of pill links, one picked. */
+function Pills({ label, options }: { label: string; options: { label: string; href: string; current: boolean }[] }) {
+  return (
+    <nav aria-label={label} className="flex flex-wrap gap-2">
+      {options.map((o) => (
+        <Link
+          key={o.label}
+          href={o.href}
+          aria-current={o.current ? "true" : undefined}
+          scroll={false}
+          className={`rounded-full border px-3 py-1 text-xs ${
+            o.current ? "border-text bg-text font-semibold text-ink" : "border-line text-muted hover:border-muted-dim"
+          }`}
+        >
+          {o.label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+/** Every column of the income chart, newest first, with what it was made of. */
+function IncomeTable({ periods, sources }: { periods: IncomeChartPeriod[]; sources: { key: string; label: string }[] }) {
+  return (
+    <details className="mt-4 text-sm">
+      <summary className="cursor-pointer text-muted">Show as a table</summary>
+      <div className="mt-3 max-h-96 overflow-y-auto rounded-lg border border-line-soft">
+        <table className="w-full">
+          <thead className="sticky top-0 bg-surface-2 text-left text-xs text-muted">
+            <tr>
+              <th className="px-3 py-2 font-medium">Period</th>
+              <th className="px-3 py-2 text-right font-medium">Money in</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line-soft">
+            {[...periods].reverse().map((p) => (
+              <tr key={p.key} className="align-top">
+                <td className="px-3 py-1.5">
+                  {p.long}
+                  {p.note && <span className="text-xs text-muted"> · {p.note}</span>}
+                  <p className="text-xs text-muted">
+                    {sources
+                      .filter((s) => p.bySource[s.key])
+                      .map((s) => `${s.label} ${formatCents(p.bySource[s.key], { whole: true })}`)
+                      .join(" · ")}
+                  </p>
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{p.empty ? "—" : formatCents(p.totalCents, { whole: true })}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  );
+}
+
 /** Money in and out: this month by category, the last year by month, and what recurs. */
 export default async function SpendingPage({ searchParams }: PageProps<"/spending">) {
   const { user } = await requireUser();
   const { db } = appContext();
   const today = todayKey();
   const months = monthsEnding(today, 12);
-  const asked = (await searchParams).month;
+  const params = await searchParams;
+  const asked = params.month;
   const month = typeof asked === "string" && months.includes(asked) ? asked : months.at(-1)!;
+  const interval = INTERVALS.find((i) => i.value === params.income) ?? INTERVALS[1];
+  const by: IncomeGrouping = params.by === "kind" ? "kind" : "payer";
 
   const status = transactionsStatus(db, user.id);
-  const txns = listTransactions(db, user.id, { from: addDays(today, -400) });
-  const outside = outsideTransfers(txns);
+  // All of it — Plaid keeps two years — for income by quarter and year; the rest looks back about a year.
+  const history = listTransactions(db, user.id);
+  const outside = outsideTransfers(history);
+  const since = addDays(today, -400);
+  const txns = history.filter((t) => t.day >= since);
   const flows = monthlyFlow(txns, months, outside);
   const flow = flows.find((f) => f.month === month)!;
   const recurring = recurringCharges(txns, today, outside);
   const monthTxns = txns.filter((t) => t.day.startsWith(month));
   const busiest = Math.max(1, ...flows.map((f) => Math.max(f.incomeCents, f.spendingCents)));
   const biggest = Math.max(1, ...flow.byCategory.map((c) => c.cents));
+
+  const income = incomeBySource(history, periodsEnding(today, interval.value, interval.count), today, { by, outside });
+  const chartPeriods = income.periods.map((p) => describePeriod(p, interval.value, history.at(-1)?.day));
+  /** This page with one choice changed and the others kept. */
+  const hrefWith = (change: { month?: string; income?: Interval; by?: IncomeGrouping }) => {
+    const q = new URLSearchParams();
+    const m = change.month ?? month;
+    if (m !== months.at(-1)) q.set("month", m);
+    const i = change.income ?? interval.value;
+    const b = change.by ?? by;
+    if (i !== "month") q.set("income", i);
+    if (b !== "payer") q.set("by", b);
+    return q.size ? `/spending?${q}` : "/spending";
+  };
 
   return (
     <>
@@ -102,6 +214,86 @@ export default async function SpendingPage({ searchParams }: PageProps<"/spendin
               )}
             </section>
 
+            <Section
+              title="Money in"
+              subtitle={
+                by === "payer"
+                  ? "Where it came from, payer by payer."
+                  : "Where it came from, by kind: paychecks, interest, money sent to you."
+              }
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Pills
+                  label="Interval"
+                  options={INTERVALS.map((i) => ({ label: i.label, href: hrefWith({ income: i.value }), current: i.value === interval.value }))}
+                />
+                <Pills
+                  label="Group by"
+                  options={[
+                    { label: "By payer", href: hrefWith({ by: "payer" }), current: by === "payer" },
+                    { label: "By kind", href: hrefWith({ by: "kind" }), current: by === "kind" },
+                  ]}
+                />
+              </div>
+
+              <div className="mt-5 grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-muted">
+                    Last {interval.count} {interval.label.toLowerCase()}
+                  </p>
+                  <p className="text-2xl font-bold">{formatCents(income.totalCents, { whole: true })}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted">Average {interval.value}</p>
+                  <p className="text-2xl font-bold">
+                    {income.averageCents === null ? "—" : formatCents(income.averageCents, { whole: true })}
+                  </p>
+                  {income.averageCents !== null && <p className="text-xs text-muted">Whole {interval.label.toLowerCase()} only.</p>}
+                </div>
+              </div>
+
+              {income.sources.length > 0 && (
+                <div className="mt-5">
+                  <IncomeLegend sources={income.sources} />
+                </div>
+              )}
+              <div className="mt-3">
+                <IncomeChart periods={chartPeriods} sources={income.sources} label={interval.label} />
+              </div>
+
+              {income.sources.length > 0 && (
+                <>
+                  <table className="mt-5 w-full text-sm">
+                    <thead className="text-left text-xs text-muted">
+                      <tr>
+                        <th className="pb-2 font-normal">{by === "payer" ? "Payer" : "Kind"}</th>
+                        <th className="pb-2 text-right font-normal">Total</th>
+                        <th className="pb-2 text-right font-normal">Share</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-line-soft">
+                      {income.sources.map((s) => (
+                        <tr key={s.key}>
+                          <td className="max-w-0 py-2">
+                            <div className="flex items-center gap-2">
+                              <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: seriesColor(s.slot) }} aria-hidden />
+                              <span className="min-w-0 truncate">{s.label}</span>
+                            </div>
+                            <p className="ml-[18px] text-xs text-muted">{s.detail}</p>
+                          </td>
+                          <td className="py-2 pl-3 text-right tabular-nums">{formatCents(s.totalCents, { whole: true })}</td>
+                          <td className="w-16 py-2 text-right tabular-nums text-muted">
+                            {income.totalCents > 0 ? `${Math.round((s.totalCents / income.totalCents) * 100)}%` : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <IncomeTable periods={chartPeriods} sources={income.sources} />
+                </>
+              )}
+            </Section>
+
             <Section title="Where it went">
               {flow.byCategory.length === 0 ? (
                 <p className="text-sm text-muted">Nothing spent this month yet.</p>
@@ -134,7 +326,7 @@ export default async function SpendingPage({ searchParams }: PageProps<"/spendin
                   {[...flows].reverse().map((f) => (
                     <tr key={f.month} className={f.month === month ? "font-medium" : ""}>
                       <td className="py-2">
-                        <Link href={`/spending?month=${f.month}`} className="hover:underline">
+                        <Link href={hrefWith({ month: f.month })} className="hover:underline">
                           {shortMonth.format(utc(f.month))}
                         </Link>
                         <div className="mt-1 w-24 sm:w-40">

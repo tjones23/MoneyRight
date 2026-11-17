@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { averageMonthlyNet, merchantKey, monthlyFlow, monthsEnding, outsideTransfers, recurringCharges, type Txn } from "./cash-flow";
+import {
+  OTHER_SOURCES,
+  averageMonthlyNet,
+  incomeBySource,
+  merchantKey,
+  monthlyFlow,
+  monthsEnding,
+  outsideTransfers,
+  periodOf,
+  periodsEnding,
+  recurringCharges,
+  type Txn,
+} from "./cash-flow";
 
 function txn(day: string, amountCents: number, more: Partial<Txn> = {}): Txn {
   return { accountId: 1, day, amountCents, name: "Thing", merchant: null, category: "GENERAL_MERCHANDISE", categoryDetailed: null, pending: false, ...more };
@@ -113,5 +125,94 @@ describe("recurringCharges", () => {
 
   it("knows a merchant however it's spelled", () => {
     expect(merchantKey({ merchant: null, name: "SHELL OIL 57442 #12" })).toBe(merchantKey({ merchant: null, name: "Shell Oil 99120" }));
+  });
+});
+
+describe("periods", () => {
+  it("starts weeks on Monday and knows month, quarter and year ends", () => {
+    // 2026-11-16 is a Monday; the 15th a Sunday.
+    expect(periodOf("2026-11-15", "week")).toEqual({ key: "2026-11-09", start: "2026-11-09", end: "2026-11-15" });
+    expect(periodOf("2026-11-16", "week").start).toBe("2026-11-16");
+    expect(periodOf("2028-02-10", "month")).toEqual({ key: "2028-02", start: "2028-02-01", end: "2028-02-29" });
+    expect(periodOf("2026-11-16", "quarter")).toEqual({ key: "2026-Q4", start: "2026-10-01", end: "2026-12-31" });
+    expect(periodOf("2026-11-16", "year")).toEqual({ key: "2026", start: "2026-01-01", end: "2026-12-31" });
+  });
+
+  it("counts back across a year end, oldest first", () => {
+    expect(periodsEnding("2026-02-03", "quarter", 3).map((p) => p.key)).toEqual(["2025-Q3", "2025-Q4", "2026-Q1"]);
+    expect(periodsEnding("2026-01-02", "week", 2).map((p) => p.key)).toEqual(["2025-12-22", "2025-12-29"]);
+  });
+});
+
+describe("incomeBySource", () => {
+  const pay = (day: string, cents: number, name = "ACME CORP PAYROLL 12345") =>
+    txn(day, -cents, { name, category: "INCOME", categoryDetailed: "INCOME_WAGES" });
+  const txns = [
+    txn("2026-07-03", 80_00), // the first transaction: July is partly covered
+    pay("2026-07-15", 4000_00),
+    pay("2026-08-15", 4000_00, "ACME CORP PAYROLL 67890"),
+    pay("2026-09-15", 4000_00),
+    pay("2026-10-15", 4200_00),
+    txn("2026-09-02", -200_00, { name: "Zelle from Sam", category: "TRANSFER_IN", categoryDetailed: "TRANSFER_IN_ACCOUNT_TRANSFER" }),
+    txn("2026-10-30", -12_34, { name: "Interest paid", category: "INCOME", categoryDetailed: "INCOME_INTEREST_EARNED" }),
+    txn("2026-11-01", -1500_00, { merchant: "Stripe", name: "STRIPE TRANSFER", category: "TRANSFER_IN", categoryDetailed: "TRANSFER_IN_DEPOSIT" }),
+    txn("2026-10-10", 1000_00, { category: "TRANSFER_OUT" }),
+    // Sent to someone: spending, not a source of income.
+    txn("2026-10-12", 75_00, { name: "Venmo to Alex", category: "TRANSFER_OUT", categoryDetailed: "TRANSFER_OUT_ACCOUNT_TRANSFER" }),
+  ];
+  const months = periodsEnding("2026-11-16", "month", 6);
+
+  it("splits money in by payer, the same total monthlyFlow counts", () => {
+    const result = incomeBySource(txns, months, "2026-11-16");
+    expect(result.sources.map((s) => [s.label, s.totalCents])).toEqual([
+      ["ACME CORP PAYROLL 12345", 16200_00],
+      ["Stripe", 1500_00],
+      ["Zelle from Sam", 200_00],
+      ["Interest paid", 12_34],
+    ]);
+    expect(result.sources[0].detail).toBe("Paychecks");
+    expect(result.sources[1].detail).toBe("Sent to you");
+    const flows = monthlyFlow(txns, months.map((p) => p.key));
+    expect(result.periods.map((p) => p.totalCents)).toEqual(flows.map((f) => f.incomeCents));
+    expect(result.totalCents).toBe(16200_00 + 1500_00 + 200_00 + 12_34);
+  });
+
+  it("marks periods before, part-way into and still in progress, and averages only whole ones", () => {
+    const result = incomeBySource(txns, months, "2026-11-16");
+    expect(result.periods.map((p) => (p.empty ? "empty" : p.partial ? "partial" : p.current ? "current" : "whole"))).toEqual([
+      "empty",
+      "partial",
+      "whole",
+      "whole",
+      "whole",
+      "current",
+    ]);
+    // August, September, October.
+    expect(result.averageCents).toBe(Math.round((4000_00 + 4200_00 + 4212_34) / 3));
+  });
+
+  it("groups by kind", () => {
+    const result = incomeBySource(txns, months, "2026-11-16", { by: "kind" });
+    expect(result.sources.map((s) => [s.label, s.totalCents, s.detail])).toEqual([
+      ["Paychecks", 16200_00, "1 payer"],
+      ["Sent to you", 1700_00, "2 payers"],
+      ["Interest", 12_34, "1 payer"],
+    ]);
+  });
+
+  it("folds the smaller sources together, and keeps each source's color whatever the window", () => {
+    const folded = incomeBySource(txns, months, "2026-11-16", { maxSources: 2 });
+    expect(folded.sources.map((s) => s.key)).toEqual([merchantKey(txns[1]), "stripe", OTHER_SOURCES]);
+    expect(folded.sources.at(-1)).toMatchObject({ totalCents: 212_34, detail: "2 smaller sources", slot: -1 });
+
+    // Just November: Stripe is the only source shown, and keeps the second color.
+    const november = incomeBySource(txns, periodsEnding("2026-11-16", "month", 1), "2026-11-16");
+    expect(november.sources).toMatchObject([{ key: "stripe", slot: 1 }]);
+  });
+
+  it("names a lone extra source rather than folding it", () => {
+    const result = incomeBySource(txns, months, "2026-11-16", { maxSources: 3 });
+    expect(result.sources.map((s) => s.key)).not.toContain(OTHER_SOURCES);
+    expect(result.sources).toHaveLength(4);
   });
 });

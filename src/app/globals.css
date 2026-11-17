@@ -29,6 +29,18 @@
   /* Chart lines: the accent's hue, stepped into the dark band and checked
      against --surface with the dataviz validator (lightness, ≥3:1). */
   --chart-line: #24ab72;
+
+  /* Categorical series, in this order and never cycled: each slot's dark
+     step, checked as a set against --surface with the dataviz validator
+     (adjacent CVD ΔE ≥ 8.4, normal-vision ≥ 19.3, all ≥ 3:1). The folded
+     "everything else" is a neutral, never a seventh hue. */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #0ca30c;
+  --series-other: #565663;
 }
 
 @media (prefers-color-scheme: light) {
@@ -53,6 +65,17 @@
     --good: #0b7a4b;
 
     --chart-line: #0b7a4b;
+
+    /* Light steps of the same hues (adjacent CVD ΔE ≥ 9.1). Aqua, yellow
+       and magenta are under 3:1 on white, so a legend and table always
+       go with them. */
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
+    --series-4: #eda100;
+    --series-5: #e87ba4;
+    --series-6: #008300;
+    --series-other: #b4b4be;
   }
 }
 

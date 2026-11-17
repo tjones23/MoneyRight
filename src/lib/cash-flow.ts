@@ -272,3 +272,194 @@ export function recurringCharges(txns: Txn[], today: DateKey, outside = outsideT
   }
   return found.sort((a, b) => b.monthlyCents - a.monthlyCents);
 }
+
+// ---------------------------------------------------------------------------
+// Income by source
+// ---------------------------------------------------------------------------
+
+export type Interval = "week" | "month" | "quarter" | "year";
+
+/** How many of each the income chart shows: a quarter of weeks, a year of months, two of quarters — Plaid keeps two years. */
+export const INTERVALS: { value: Interval; label: string; count: number }[] = [
+  { value: "week", label: "Weeks", count: 13 },
+  { value: "month", label: "Months", count: 12 },
+  { value: "quarter", label: "Quarters", count: 8 },
+  { value: "year", label: "Years", count: 3 },
+];
+
+export interface Period {
+  /** "2026-11-09" (the week's Monday), "2026-11", "2026-Q4" or "2026". */
+  key: string;
+  start: DateKey;
+  /** Inclusive. */
+  end: DateKey;
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+/** The period `day` falls in. Weeks start on Monday. */
+export function periodOf(day: DateKey, interval: Interval): Period {
+  const [y, m] = day.split("-").map(Number);
+  if (interval === "week") {
+    const weekday = new Date(`${day}T12:00:00Z`).getUTCDay();
+    const start = addDays(day, -((weekday + 6) % 7));
+    return { key: start, start, end: addDays(start, 6) };
+  }
+  if (interval === "month") {
+    const start = `${y}-${pad2(m)}-01`;
+    return { key: start.slice(0, 7), start, end: addDays(nthMonthDay(start, 1, 1), -1) };
+  }
+  if (interval === "quarter") {
+    const q = Math.floor((m - 1) / 3);
+    const start = `${y}-${pad2(q * 3 + 1)}-01`;
+    return { key: `${y}-Q${q + 1}`, start, end: addDays(nthMonthDay(start, 3, 1), -1) };
+  }
+  return { key: String(y), start: `${y}-01-01`, end: `${y}-12-31` };
+}
+
+/** The `count` periods ending with `today`'s, oldest first. */
+export function periodsEnding(today: DateKey, interval: Interval, count: number): Period[] {
+  const periods = [periodOf(today, interval)];
+  while (periods.length < count) periods.unshift(periodOf(addDays(periods[0].start, -1), interval));
+  return periods;
+}
+
+export type IncomeGrouping = "payer" | "kind";
+
+const INCOME_KIND: Record<string, string> = {
+  INCOME_WAGES: "Paychecks",
+  INCOME_DIVIDENDS: "Dividends",
+  INCOME_INTEREST_EARNED: "Interest",
+  INCOME_RETIREMENT_PENSION: "Retirement and pension",
+  INCOME_TAX_REFUND: "Tax refunds",
+  INCOME_UNEMPLOYMENT: "Unemployment",
+};
+
+/** What sort of money in a transaction is: a paycheck, interest, money someone sent. */
+export function incomeKind(t: Txn): string {
+  if (t.category !== "INCOME") return "Sent to you";
+  return (t.categoryDetailed && INCOME_KIND[t.categoryDetailed]) || "Other income";
+}
+
+/** The key of the smaller sources, folded together. */
+export const OTHER_SOURCES = "other";
+
+export interface IncomeSource {
+  /** The same whichever interval is shown, so a source keeps its color. */
+  key: string;
+  label: string;
+  /** For a payer, the kind of money it sends; for a kind, how many payers. */
+  detail: string;
+  /** Over the periods shown. */
+  totalCents: number;
+  /** Its color: rank over all of history, from 0; −1 for "Everything else". */
+  slot: number;
+}
+
+export interface IncomePeriod extends Period {
+  /** Money in by source key; a source with nothing this period is absent. */
+  bySource: Record<string, number>;
+  totalCents: number;
+  /** Today falls in it: not over yet. */
+  current: boolean;
+  /** Transactions begin part-way through it, so it's undercounted. */
+  partial: boolean;
+  /** Over before transactions begin: nothing known. */
+  empty: boolean;
+}
+
+export interface IncomeBreakdown {
+  periods: IncomePeriod[];
+  /** Largest first over the periods shown, "Everything else" last; at most `maxSources` + 1. */
+  sources: IncomeSource[];
+  totalCents: number;
+  /** Per period, over the whole ones (over, and fully covered); null with none. */
+  averageCents: number | null;
+}
+
+/**
+ * Money in, split by where it came from, per period — exactly what
+ * monthlyFlow counts as income. Which sources get named is decided over all
+ * of `txns`, not just the periods shown, so switching from months to weeks
+ * doesn't reshuffle them or their colors; past `maxSources`, the rest fold
+ * into "Everything else".
+ */
+export function incomeBySource(
+  txns: Txn[],
+  periods: Period[],
+  today: DateKey,
+  { by = "payer", maxSources = 5, outside = outsideTransfers(txns) }: { by?: IncomeGrouping; maxSources?: number; outside?: Set<Txn> } = {},
+): IncomeBreakdown {
+  const income = txns.filter((t) => counts(t, outside) && (t.category === "INCOME" || (outside.has(t) && t.amountCents < 0)));
+  // Newest first, so a payer is labelled the way the bank spells it now.
+  income.sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0));
+
+  const keyOf = (t: Txn) => (by === "kind" ? incomeKind(t) : merchantKey(t) || "unknown");
+  const meta = new Map<string, { label: string; detail: string; allTime: number; payers: Set<string> }>();
+  for (const t of income) {
+    const key = keyOf(t);
+    let m = meta.get(key);
+    if (!m) {
+      m = { label: by === "kind" ? key : t.merchant || t.name, detail: incomeKind(t), allTime: 0, payers: new Set() };
+      meta.set(key, m);
+    }
+    m.allTime -= t.amountCents;
+    m.payers.add(merchantKey(t));
+  }
+  const ranked = [...meta].sort((a, b) => b[1].allTime - a[1].allTime).map(([key]) => key);
+  // Folding a single source into "Everything else" hides it for nothing: name it.
+  const named = new Set(ranked.length <= maxSources + 1 ? ranked : ranked.slice(0, maxSources));
+
+  const first = txns.reduce<string | null>((min, t) => (min === null || t.day < min ? t.day : min), null);
+  const shown = periods.map<IncomePeriod>((p) => ({
+    ...p,
+    bySource: {},
+    totalCents: 0,
+    current: p.start <= today && today <= p.end,
+    partial: first !== null && p.start < first && first <= p.end,
+    empty: first === null || p.end < first,
+  }));
+  const totals = new Map<string, number>();
+  for (const t of income) {
+    const period = shown.find((p) => p.start <= t.day && t.day <= p.end);
+    if (!period) continue;
+    const key = named.has(keyOf(t)) ? keyOf(t) : OTHER_SOURCES;
+    period.bySource[key] = (period.bySource[key] ?? 0) - t.amountCents;
+    period.totalCents -= t.amountCents;
+    totals.set(key, (totals.get(key) ?? 0) - t.amountCents);
+  }
+
+  const sources: IncomeSource[] = ranked
+    .filter((key) => named.has(key) && totals.get(key))
+    .map((key) => {
+      const m = meta.get(key)!;
+      return {
+        key,
+        slot: ranked.indexOf(key),
+        label: m.label,
+        detail: by === "kind" ? `${m.payers.size} ${m.payers.size === 1 ? "payer" : "payers"}` : m.detail,
+        totalCents: totals.get(key)!,
+      };
+    })
+    .sort((a, b) => b.totalCents - a.totalCents);
+  if (totals.get(OTHER_SOURCES)) {
+    const folded = ranked.filter((key) => !named.has(key)).length;
+    sources.push({
+      key: OTHER_SOURCES,
+      slot: -1,
+      label: "Everything else",
+      detail: `${folded} smaller ${by === "kind" ? "kinds" : "sources"}`,
+      totalCents: totals.get(OTHER_SOURCES)!,
+    });
+  }
+
+  const whole = shown.filter((p) => !p.current && !p.partial && !p.empty);
+  return {
+    periods: shown,
+    sources,
+    totalCents: shown.reduce((n, p) => n + p.totalCents, 0),
+    averageCents: whole.length ? Math.round(whole.reduce((n, p) => n + p.totalCents, 0) / whole.length) : null,
+  };
+}
