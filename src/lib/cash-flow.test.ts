@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { averageMonthlyNet, merchantKey, monthlyFlow, monthsEnding, recurringCharges, type Txn } from "./cash-flow";
+import { averageMonthlyNet, merchantKey, monthlyFlow, monthsEnding, receivedTransfers, recurringCharges, type Txn } from "./cash-flow";
 
 function txn(day: string, amountCents: number, more: Partial<Txn> = {}): Txn {
   return { accountId: 1, day, amountCents, name: "Thing", merchant: null, category: "GENERAL_MERCHANDISE", categoryDetailed: null, pending: false, ...more };
@@ -24,6 +24,31 @@ describe("monthlyFlow", () => {
     expect(sep.spendingCents).toBe(120_00 + 250_00 + 1800_00);
     expect(sep.netCents).toBe(5000_00 - 2170_00);
     expect(sep.byCategory.map((c) => c.category)).toEqual(["LOAN_PAYMENTS", "GENERAL_MERCHANDISE", "FOOD_AND_DRINK"]);
+  });
+
+  it("counts money sent from outside as income, but not money moved between your own accounts", () => {
+    const zelle = txn("2026-09-02", -200_00, { name: "Zelle from Sam", category: "TRANSFER_IN", categoryDetailed: "TRANSFER_IN_ACCOUNT_TRANSFER" });
+    const stripe = txn("2026-09-04", -1234_56, { name: "STRIPE TRANSFER", category: "TRANSFER_IN", categoryDetailed: "TRANSFER_IN_DEPOSIT" });
+    // Savings to checking: out of account 2, into account 1 two days later.
+    const fromSavings = txn("2026-09-08", 500_00, { accountId: 2, category: "TRANSFER_OUT", categoryDetailed: "TRANSFER_OUT_ACCOUNT_TRANSFER" });
+    const intoChecking = txn("2026-09-10", -500_00, { category: "TRANSFER_IN", categoryDetailed: "TRANSFER_IN_ACCOUNT_TRANSFER" });
+    // An unlinked brokerage paying out, and a cash advance: your own money, or borrowed.
+    const brokerage = txn("2026-09-11", -300_00, { category: "TRANSFER_IN", categoryDetailed: "TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS" });
+    const advance = txn("2026-09-12", -100_00, { category: "TRANSFER_IN", categoryDetailed: "TRANSFER_IN_CASH_ADVANCES_AND_LOANS" });
+    const pendingVenmo = txn("2026-09-13", -40_00, { category: "TRANSFER_IN", categoryDetailed: "TRANSFER_IN_ACCOUNT_TRANSFER", pending: true });
+    const all = [zelle, stripe, fromSavings, intoChecking, brokerage, advance, pendingVenmo];
+
+    expect(receivedTransfers(all)).toEqual(new Set([zelle, stripe]));
+    const [sep] = monthlyFlow(all, ["2026-09"]);
+    expect(sep.incomeCents).toBe(200_00 + 1234_56);
+    expect(sep.spendingCents).toBe(0);
+  });
+
+  it("doesn't pair a transfer in with an outflow from the same account, or one too far apart", () => {
+    const sameAccount = txn("2026-09-01", 500_00, { category: "TRANSFER_OUT" });
+    const weeksLater = txn("2026-09-20", 500_00, { accountId: 2, category: "TRANSFER_OUT" });
+    const venmo = txn("2026-09-02", -500_00, { category: "TRANSFER_IN", categoryDetailed: "TRANSFER_IN_ACCOUNT_TRANSFER" });
+    expect(receivedTransfers([sameAccount, weeksLater, venmo])).toEqual(new Set([venmo]));
   });
 
   it("averages only whole months after transactions begin", () => {

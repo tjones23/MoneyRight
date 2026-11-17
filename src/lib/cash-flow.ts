@@ -6,7 +6,10 @@ import { addDays, daysBetween, nthMonthDay, type DateKey } from "./local-date";
  *
  * Amounts keep Plaid's sign — positive is money out of an account. Moving
  * money between your own accounts isn't spending, so transfers and credit
- * card payments are left out (the card's purchases already count). A refund
+ * card payments are left out (the card's purchases already count). Money
+ * someone else sent — Venmo, Zelle, a Stripe payout — is filed by Plaid as a
+ * transfer in too, so a transfer in that no other account of yours paid out
+ * counts as income (receivedTransfers). A refund
  * nets against the category it came back to rather than counting as income.
  * Loan payments (a mortgage, MOHELA) do count: that cash is gone.
  *
@@ -62,9 +65,42 @@ export function isTransfer(t: Txn): boolean {
   );
 }
 
-/** What counts: settled, and not a transfer. */
-function counts(t: Txn): boolean {
-  return !t.pending && !isTransfer(t);
+/**
+ * Plaid's kinds of transfer in that can be someone else paying you: Venmo,
+ * Zelle and Cash App, a Stripe payout, a deposited check. Not savings,
+ * investments or a cash advance — those are your own money, or borrowed.
+ */
+const RECEIVABLE = new Set(["TRANSFER_IN_ACCOUNT_TRANSFER", "TRANSFER_IN_DEPOSIT", "TRANSFER_IN_OTHER_TRANSFER_IN"]);
+
+/** How far apart the two sides of one of your own transfers can post. */
+const TRANSFER_DAYS = 5;
+
+/**
+ * Transfers in that came from outside: no other of your accounts paid out
+ * the same amount within a few days. Those are money in, not money moved.
+ */
+export function receivedTransfers(txns: Txn[]): Set<Txn> {
+  const outflows = new Map<number, Txn[]>();
+  for (const t of txns) {
+    if (!t.pending && t.amountCents > 0) outflows.set(t.amountCents, [...(outflows.get(t.amountCents) ?? []), t]);
+  }
+  const used = new Set<Txn>();
+  const received = new Set<Txn>();
+  for (const t of txns) {
+    if (t.pending || t.amountCents >= 0 || t.category !== "TRANSFER_IN") continue;
+    if (t.categoryDetailed && !RECEIVABLE.has(t.categoryDetailed)) continue;
+    const pair = (outflows.get(-t.amountCents) ?? []).find(
+      (o) => !used.has(o) && o.accountId !== t.accountId && Math.abs(daysBetween(o.day, t.day)) <= TRANSFER_DAYS,
+    );
+    if (pair) used.add(pair);
+    else received.add(t);
+  }
+  return received;
+}
+
+/** What counts: settled, and not a transfer — unless it's one received from outside. */
+function counts(t: Txn, received: Set<Txn>): boolean {
+  return !t.pending && (!isTransfer(t) || received.has(t));
 }
 
 export interface MonthFlow {
@@ -78,14 +114,14 @@ export interface MonthFlow {
   byCategory: { category: string; cents: number }[];
 }
 
-export function monthlyFlow(txns: Txn[], months: string[]): MonthFlow[] {
+export function monthlyFlow(txns: Txn[], months: string[], received = receivedTransfers(txns)): MonthFlow[] {
   const wanted = new Set(months);
   const flows = new Map(months.map((m) => [m, { income: 0, categories: new Map<string, number>() }]));
   for (const t of txns) {
     const month = t.day.slice(0, 7);
-    if (!wanted.has(month) || !counts(t)) continue;
+    if (!wanted.has(month) || !counts(t, received)) continue;
     const flow = flows.get(month)!;
-    if (t.category === "INCOME") {
+    if (t.category === "INCOME" || received.has(t)) {
       flow.income -= t.amountCents;
       continue;
     }
@@ -186,7 +222,7 @@ function steady(values: number[], centre: number, share: number): boolean {
 export function recurringCharges(txns: Txn[], today: DateKey): Recurring[] {
   const groups = new Map<string, Txn[]>();
   for (const t of txns) {
-    if (!counts(t) || t.amountCents <= 0 || t.category === "INCOME") continue;
+    if (t.pending || isTransfer(t) || t.amountCents <= 0 || t.category === "INCOME") continue;
     const key = merchantKey(t);
     if (!key) continue;
     groups.set(key, [...(groups.get(key) ?? []), t]);
