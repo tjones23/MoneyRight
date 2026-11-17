@@ -4,7 +4,8 @@ import { PageBody, SiteHeader } from "@/components/SiteHeader";
 import { requireUser } from "@/server/auth";
 import { appContext } from "@/server/context";
 import { listTransactions, transactionsStatus } from "@/server/transactions";
-import { IncomeChart, IncomeLegend, seriesColor, type IncomeChartPeriod } from "@/components/IncomeChart";
+import { IncomeChart, IncomeLegend, type IncomeChartPeriod } from "@/components/IncomeChart";
+import { seriesColor } from "@/lib/series-color";
 import {
   INTERVALS,
   categoryLabel,
