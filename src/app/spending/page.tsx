@@ -4,7 +4,7 @@ import { PageBody, SiteHeader } from "@/components/SiteHeader";
 import { requireUser } from "@/server/auth";
 import { appContext } from "@/server/context";
 import { listTransactions, transactionsStatus } from "@/server/transactions";
-import { categoryLabel, isTransfer, monthlyFlow, monthsEnding, receivedTransfers, recurringCharges } from "@/lib/cash-flow";
+import { categoryLabel, isTransfer, monthlyFlow, monthsEnding, outsideTransfers, recurringCharges } from "@/lib/cash-flow";
 import { addDays, todayKey } from "@/lib/local-date";
 import { formatCents, formatChange } from "@/lib/money";
 
@@ -49,10 +49,10 @@ export default async function SpendingPage({ searchParams }: PageProps<"/spendin
 
   const status = transactionsStatus(db, user.id);
   const txns = listTransactions(db, user.id, { from: addDays(today, -400) });
-  const received = receivedTransfers(txns);
-  const flows = monthlyFlow(txns, months, received);
+  const outside = outsideTransfers(txns);
+  const flows = monthlyFlow(txns, months, outside);
   const flow = flows.find((f) => f.month === month)!;
-  const recurring = recurringCharges(txns, today);
+  const recurring = recurringCharges(txns, today, outside);
   const monthTxns = txns.filter((t) => t.day.startsWith(month));
   const busiest = Math.max(1, ...flows.map((f) => Math.max(f.incomeCents, f.spendingCents)));
   const biggest = Math.max(1, ...flow.byCategory.map((c) => c.cents));
@@ -62,7 +62,7 @@ export default async function SpendingPage({ searchParams }: PageProps<"/spendin
       <SiteHeader user={user} />
       <PageBody
         title="Spending"
-        subtitle="From your linked bank and card transactions. Transfers between your own accounts and card payments aren't counted — the card's purchases are. Money sent to you, like Venmo, Zelle or a Stripe payout, counts as money in."
+        subtitle="From your linked bank and card transactions. Transfers between your own accounts and card payments aren't counted — the card's purchases are. Money to or from someone else, like Venmo, Zelle or a Stripe payout, counts as money in or spending."
       >
         {status.connections === 0 ? (
           <section className="rounded-2xl border border-dashed border-line p-6 text-sm text-muted">
@@ -185,7 +185,7 @@ export default async function SpendingPage({ searchParams }: PageProps<"/spendin
               ) : (
                 <ul className="divide-y divide-line-soft text-sm">
                   {monthTxns.map((t) => {
-                    const moved = isTransfer(t) && !received.has(t);
+                    const moved = isTransfer(t) && !outside.has(t);
                     return (
                       <li key={t.id} className="flex items-center gap-3 py-2">
                         <div className="min-w-0 flex-1">
@@ -193,7 +193,7 @@ export default async function SpendingPage({ searchParams }: PageProps<"/spendin
                           <p className="text-xs text-muted">
                             {dayFormat.format(utc(t.day))} · {t.accountName} · {categoryLabel(t.category ?? "OTHER")}
                             {moved && " · transfer, not counted"}
-                            {received.has(t) && " · received, counted as money in"}
+                            {outside.has(t) && (t.amountCents < 0 ? " · received, counted as money in" : " · sent, counted as spending")}
                             {t.pending && " · pending"}
                           </p>
                         </div>
