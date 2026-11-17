@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { averageMonthlyNet, merchantKey, monthlyFlow, monthsEnding, receivedTransfers, recurringCharges, type Txn } from "./cash-flow";
+import { averageMonthlyNet, merchantKey, monthlyFlow, monthsEnding, outsideTransfers, recurringCharges, type Txn } from "./cash-flow";
 
 function txn(day: string, amountCents: number, more: Partial<Txn> = {}): Txn {
   return { accountId: 1, day, amountCents, name: "Thing", merchant: null, category: "GENERAL_MERCHANDISE", categoryDetailed: null, pending: false, ...more };
@@ -38,17 +38,42 @@ describe("monthlyFlow", () => {
     const pendingVenmo = txn("2026-09-13", -40_00, { category: "TRANSFER_IN", categoryDetailed: "TRANSFER_IN_ACCOUNT_TRANSFER", pending: true });
     const all = [zelle, stripe, fromSavings, intoChecking, brokerage, advance, pendingVenmo];
 
-    expect(receivedTransfers(all)).toEqual(new Set([zelle, stripe]));
+    expect(outsideTransfers(all)).toEqual(new Set([zelle, stripe]));
     const [sep] = monthlyFlow(all, ["2026-09"]);
     expect(sep.incomeCents).toBe(200_00 + 1234_56);
     expect(sep.spendingCents).toBe(0);
   });
 
-  it("doesn't pair a transfer in with an outflow from the same account, or one too far apart", () => {
+  it("counts money sent to someone else as spending, but not money moved to your own accounts", () => {
+    const venmo = txn("2026-09-03", 60_00, { name: "Venmo to Alex", category: "TRANSFER_OUT", categoryDetailed: "TRANSFER_OUT_ACCOUNT_TRANSFER" });
+    const zelle = txn("2026-09-05", 1500_00, { name: "Zelle to landlord", category: "TRANSFER_OUT", categoryDetailed: "TRANSFER_OUT_OTHER_TRANSFER_OUT" });
+    // Checking to savings: out of account 1, into account 2 the next day.
+    const toSavings = txn("2026-09-08", 400_00, { category: "TRANSFER_OUT", categoryDetailed: "TRANSFER_OUT_ACCOUNT_TRANSFER" });
+    const intoSavings = txn("2026-09-09", -400_00, { accountId: 2, category: "TRANSFER_IN", categoryDetailed: "TRANSFER_IN_SAVINGS" });
+    // An unlinked brokerage, and cash from an ATM: still yours.
+    const brokerage = txn("2026-09-10", 250_00, { category: "TRANSFER_OUT", categoryDetailed: "TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS" });
+    const atm = txn("2026-09-11", 80_00, { category: "TRANSFER_OUT", categoryDetailed: "TRANSFER_OUT_WITHDRAWAL" });
+    const all = [venmo, zelle, toSavings, intoSavings, brokerage, atm];
+
+    expect(outsideTransfers(all)).toEqual(new Set([venmo, zelle]));
+    const [sep] = monthlyFlow(all, ["2026-09"]);
+    expect(sep.incomeCents).toBe(0);
+    expect(sep.byCategory).toEqual([{ category: "SENT", cents: 1560_00 }]);
+  });
+
+  it("doesn't pair a transfer with one from the same account, or one too far apart", () => {
     const sameAccount = txn("2026-09-01", 500_00, { category: "TRANSFER_OUT" });
     const weeksLater = txn("2026-09-20", 500_00, { accountId: 2, category: "TRANSFER_OUT" });
     const venmo = txn("2026-09-02", -500_00, { category: "TRANSFER_IN", categoryDetailed: "TRANSFER_IN_ACCOUNT_TRANSFER" });
-    expect(receivedTransfers([sameAccount, weeksLater, venmo])).toEqual(new Set([venmo]));
+    expect(outsideTransfers([sameAccount, weeksLater, venmo])).toEqual(new Set([venmo]));
+  });
+
+  it("pairs each side of a transfer once", () => {
+    // Two Venmo cash-outs to checking for the same amount, one funded from a linked Venmo balance.
+    const fromVenmo = txn("2026-09-01", 100_00, { accountId: 2, category: "TRANSFER_OUT", categoryDetailed: "TRANSFER_OUT_ACCOUNT_TRANSFER" });
+    const first = txn("2026-09-02", -100_00, { category: "TRANSFER_IN", categoryDetailed: "TRANSFER_IN_ACCOUNT_TRANSFER" });
+    const second = txn("2026-09-03", -100_00, { category: "TRANSFER_IN", categoryDetailed: "TRANSFER_IN_ACCOUNT_TRANSFER" });
+    expect(outsideTransfers([fromVenmo, first, second])).toEqual(new Set([second]));
   });
 
   it("averages only whole months after transactions begin", () => {
@@ -76,6 +101,14 @@ describe("recurringCharges", () => {
     expect(recurringCharges([netflix("2026-05-15"), netflix("2026-06-15"), netflix("2026-07-15")], "2026-11-01")).toEqual([]);
     expect(recurringCharges([netflix("2026-08-01"), netflix("2026-08-29"), netflix("2026-10-20")], "2026-11-01")).toEqual([]);
     expect(recurringCharges([netflix("2026-08-15", 1500), netflix("2026-09-15", 9000), netflix("2026-10-15", 400)], "2026-11-01")).toEqual([]);
+  });
+
+  it("finds rent paid by Zelle", () => {
+    const rent = (day: string) =>
+      txn(day, 1500_00, { name: "Zelle to landlord", category: "TRANSFER_OUT", categoryDetailed: "TRANSFER_OUT_ACCOUNT_TRANSFER" });
+    expect(recurringCharges([rent("2026-08-01"), rent("2026-09-01"), rent("2026-10-01")], "2026-11-01")).toEqual([
+      expect.objectContaining({ name: "Zelle to landlord", cadence: "monthly", amountCents: 1500_00 }),
+    ]);
   });
 
   it("knows a merchant however it's spelled", () => {
